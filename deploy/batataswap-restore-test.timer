@@ -1,0 +1,10 @@
+[Unit]
+Description=Agenda BatataSwap restore-test
+
+[Timer]
+OnCalendar=Sun *-*-* 04:17:00
+Persistent=true
+Unit=batataswap-restore-test.service
+
+[Install]
+WantedBy=timers.target

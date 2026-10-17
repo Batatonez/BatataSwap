@@ -1,0 +1,46 @@
+[Unit]
+Description=BatataSwap serve
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=3
+User=batataswap
+Group=batataswap
+LoadCredentialEncrypted=batataswap-master:/etc/credstore.encrypted/batataswap-master
+Environment=BATATASWAP_CONFIG=/etc/batataswap/batataswap.toml
+StateDirectory=batataswap
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateUsers=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+ProtectHostname=yes
+ProtectClock=yes
+SystemCallArchitectures=native
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+UMask=0077
+MemoryMax=512M
+ReadWritePaths=/var/backups/batataswap
+SyslogIdentifier=batataswap
+ExecStart=/opt/batataswap/.venv/bin/python -m batataswap serve
+
+[Install]
+WantedBy=multi-user.target

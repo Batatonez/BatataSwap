@@ -1,0 +1,41 @@
+# Troque SEU-TAILNET pelo nome real; HTTPS sem barra final nem porta explícita.
+public_origin = "https://batatarp.SEU-TAILNET.ts.net"
+# Escuta somente local, atrás do Funnel.
+bind_host = "127.0.0.1"
+port = 8780
+# Dados e cópias ficam fora do repositório.
+data_dir = "/var/lib/batataswap"
+backup_dir = "/var/backups/batataswap"
+# Opcional: descomente após publicar o painel e informe a origem exata.
+# vercel_origin = "https://SEU-PROJETO.vercel.app"
+painel_client_id = "painel-vercel"
+allowed_cimd_client_ids = ["https://claude.ai/oauth/mcp-oauth-client-metadata"]
+# No spike o Claude não enviou Origin; qualquer Origin presente será recusado.
+allowed_mcp_origins = []
+account_labels = ["conta-1", "conta-2"]
+
+# Limites de tamanho em bytes, salvo campos terminados em chars (caracteres).
+# seconds são segundos; days são dias; demais campos são contagens.
+[limits]
+summary_chars = 8000
+context_list_items = 50
+context_list_item_chars = 500
+context_bytes = 32768
+preference_chars = 1000
+message_chars = 4000
+messages_per_call = 40
+message_batch_bytes = 196608
+conversation_bytes = 2097152
+mcp_body_bytes = 262144
+unauthenticated_mcp_body_bytes = 8192
+daily_writes = 300
+daily_bytes = 4194304
+stored_bytes = 209715200
+pending_transactions = 20
+operational_cleanup_seconds = 3600
+audit_retention_days = 180
+database_bytes = 314572800
+tool_response_chars = 100000
+search_block_rows = 500
+search_results = 20
+search_seconds = 2

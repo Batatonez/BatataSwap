@@ -1,0 +1,11 @@
+[Unit]
+Description=Agenda BatataSwap backup
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+Persistent=true
+RandomizedDelaySec=5min
+Unit=batataswap-backup.service
+
+[Install]
+WantedBy=timers.target

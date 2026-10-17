@@ -1,0 +1,23 @@
+#!/bin/bash
+set -euo pipefail
+if (( EUID != 0 )); then
+    echo 'Execute como root (sudo).' >&2
+    exit 1
+fi
+case "${1:-}" in
+    serve|init|key-export|backup|restore-test|export|grants|revoke|unlock|cleanup) ;;
+    restore|wipe)
+        state=$(systemctl is-active batataswap.service || true)
+        case "$state" in
+            inactive|failed) ;;
+            *) echo 'Pare batataswap.service antes de restore ou wipe.' >&2; exit 1 ;;
+        esac
+        ;;
+    *) echo 'Subcomando inválido. key-import deve ser executado diretamente como root.' >&2; exit 2 ;;
+esac
+exec systemd-run --quiet --wait --pipe --collect --uid=batataswap --gid=batataswap \
+    -p LoadCredentialEncrypted=batataswap-master:/etc/credstore.encrypted/batataswap-master \
+    -p Environment=BATATASWAP_CONFIG=/etc/batataswap/batataswap.toml \
+    -p StateDirectory=batataswap -p StateDirectoryMode=0700 -p UMask=0077 \
+    -p ReadWritePaths=/var/backups/batataswap \
+    /opt/batataswap/.venv/bin/python -m batataswap "$@"
