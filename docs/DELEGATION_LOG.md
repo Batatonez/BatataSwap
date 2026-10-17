@@ -40,4 +40,4 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-17 | T09 Núcleo da memória e conversas | 2 | worker-sonnet | ok (48 testes) |
 | 2026-10-17 | Revisão T09 | 3 | gpt-6.1-sol (Codex) | 0 crítico, 4 importantes (checkpoint silencioso, teto do banco, export sem snapshot, origem no export), 2 sugestões |
 | 2026-10-17 | Correções T09 | 2 | worker-sonnet | ok (todas; testes concorrentes reais) |
-| 2026-10-17 | T07 Borda HTTP | 3 | worker-opus | em andamento |
+| 2026-10-17 | T07 Borda HTTP | 3 | worker-opus | ok (105 testes); revisão do gpt-6.1-sol em andamento |
