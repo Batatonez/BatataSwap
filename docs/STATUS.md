@@ -51,6 +51,8 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 
 ## Pendências
 
+- T14: correções da revisão em andamento (gpt-6.1-sol, brief `.orchestrator/briefs/014-…`). **Contrato da CLI pra T12**: serve, key-init [--substituir] (root direto), key-import (root direto), init (wrapper, pty), migrate, key-export (pty), backup, restore <arq em /var/backups>, restore-test, export --out - (stdout), wipe [--incluir-backups] (pty), grants, revoke <rótulo>, unlock, cleanup. Deploy instala por SHA, não por branch. T14 precisa de 2ª revisão depois da T12.
+
 - Teste comportamental do JS do painel (PKCE, callback, expiração, demo sem rede) — sugestão da revisão; fazer junto com a T11.
 
 - ~~Repo público × código do BatataLink~~ resolvido: o Davi tirou o BatataLink do projeto. Código todo próprio; repo segue público.

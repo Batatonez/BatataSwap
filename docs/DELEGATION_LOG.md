@@ -45,4 +45,5 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-17 | Correções T07 | 3 | worker-opus | ok (127 testes; check_against pra T10) |
 | 2026-10-17 | T08 OAuth | 3 | worker-opus | em andamento |
 | 2026-10-17 | T03 Spike no servidor real | 2 | Davi + orquestrador | ok: transporte (web + Claude Code web) e descoberta OAuth até o authorize; client_id medido |
-| 2026-10-17 | T14 Deploy (units, timers, admin, instalar/atualizar, DEPLOY.md) | 3 | gpt-6.1-sol (Codex) | ok (12 testes, systemd-analyze verify); revisão do worker-opus em andamento |
+| 2026-10-17 | T14 Deploy (units, timers, admin, instalar/atualizar, DEPLOY.md) | 3 | gpt-6.1-sol (Codex) | estrutura ok (12 testes, systemd-analyze verify) |
+| 2026-10-17 | Revisão T14 | 3 | worker-opus | **2 críticos** (init deixava banco com dono root; build sem hash como root), 7 importantes; correções com gpt-6.1-sol. Precisa 2ª revisão depois da T12 |
