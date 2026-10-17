@@ -214,6 +214,13 @@ Davi (conta 1)          claude.ai                       BatataSwap
 SQLite, `journal_mode=WAL`, `foreign_keys=ON`, `secure_delete=ON`, tabelas `STRICT`, só SQL parametrizado. Migrações em `src/batataswap/migrations/NNNN_nome.sql` (migrador próprio, §14). `public_id` = prefixo + 16 caracteres base32 aleatórios.
 
 ```sql
+CREATE TABLE schema_migrations (                -- controlado pelo migrador (db.py)
+  version     INTEGER PRIMARY KEY,
+  name        TEXT    NOT NULL,
+  sha256      TEXT    NOT NULL,                 -- hash do arquivo .sql; mudou depois de aplicado → recusa
+  applied_at  INTEGER NOT NULL
+) STRICT;
+
 CREATE TABLE owner (
   id               INTEGER PRIMARY KEY CHECK (id = 1),
   password_hash    TEXT    NOT NULL,             -- scrypt (formato do §9)
@@ -394,10 +401,18 @@ CREATE TABLE audit (
   id INTEGER PRIMARY KEY, at INTEGER NOT NULL, event TEXT NOT NULL,
   grant_id INTEGER, target TEXT                  -- public_id, nunca conteúdo
 ) STRICT;
-CREATE TABLE meta (                              -- restore_epoch, versão do esquema etc.
+CREATE TABLE meta (                              -- restore_epoch etc. (versão do esquema fica em schema_migrations)
   key TEXT PRIMARY KEY, value TEXT NOT NULL
 ) STRICT;
 ```
+
+Regras de integridade que valem pra **toda** tabela com lixeira/expurgo (`projects`, `contexts`, `preferences`, `conversations`, `messages`), como `CHECK` na própria tabela:
+- `CHECK ((trashed_at IS NULL) = (trash_root IS NULL))`;
+- `CHECK (purged_at IS NULL OR <coluna cifrada> IS NULL)` e `CHECK (purged_at IS NOT NULL OR <coluna cifrada> IS NOT NULL)` (a coluna cifrada é `name_ct`, `content_ct` ou `text_ct`).
+
+Índices além dos UNIQUE: `oauth_tokens(grant_id)`, `oauth_tokens(family_id)`, `oauth_tokens(code_hash)`, `conversations(project_id)`, `audit(at)` e, em `contexts`, `conversations` e `messages`, `(trash_root) WHERE trash_root IS NOT NULL`.
+
+Migrações: só avançam em ordem (versão pendente menor que a maior aplicada → recusa); migração que recrie tabela precisa de `PRAGMA foreign_keys=OFF` **fora** da transação (o migrador ganha esse modo quando precisar). Conexões usam `trusted_schema=OFF`.
 
 Conteúdo de um contexto, antes de cifrar: `{"resumo": "…", "decisoes": ["…"], "pendencias": ["…"], "preferencias": ["…"]}`.
 
