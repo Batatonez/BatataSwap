@@ -37,4 +37,6 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-17 | T06 Senha, TOTP, rate limit, dono | 3 | gpt-6.1-sol (Codex) | ok (vetores RFC 6238, TOTP atômico) |
 | 2026-10-17 | Revisão T06 | 3 | worker-opus | aprovar com correções: 0 crítico, 5 importantes (unlock entre processos, corrida no TOTP-only, init sem confirmar TOTP, penalidade eterna, lista fraca), 7 sugestões |
 | 2026-10-17 | Correções T06 (12 itens) | 3 | gpt-6.1-sol (Codex) | ok (51 testes da T06) |
-| 2026-10-17 | T09 Núcleo da memória e conversas | 2 | worker-sonnet | ok (48 testes); revisão do gpt-6.1-sol em andamento |
+| 2026-10-17 | T09 Núcleo da memória e conversas | 2 | worker-sonnet | ok (48 testes) |
+| 2026-10-17 | Revisão T09 | 3 | gpt-6.1-sol (Codex) | 0 crítico, 4 importantes (checkpoint silencioso, teto do banco, export sem snapshot, origem no export), 2 sugestões; correções com worker-sonnet |
+| 2026-10-17 | T07 Borda HTTP | 3 | worker-opus | em andamento |
