@@ -12,6 +12,7 @@ class _State:
     failures: deque = field(default_factory=deque)
     lock_until: float = 0
     penalty: float = 0
+    last_failure: float | None = None
 
 
 class Budget:
@@ -30,19 +31,40 @@ class Budget:
             state = self._states.get(key)
             return max(0, math.ceil(state.lock_until - self._clock())) if state else 0
 
+    def _fail(self, key, now):
+        state = self._states.setdefault(key, _State())
+        if state.lock_until > now:
+            return
+        if state.last_failure is not None and now - state.last_failure > 2 * self.max_lockout:
+            state.penalty = 0
+        state.last_failure = now
+        while state.failures and state.failures[0] <= now - self.window:
+            state.failures.popleft()
+        state.failures.append(now)
+        if len(state.failures) >= self.max_failures:
+            state.penalty = min(self.max_lockout, state.penalty * 2 or self.window)
+            state.lock_until = now + state.penalty
+            state.failures.clear()
+
     def fail(self, key):
         with self._lock:
+            self._fail(key, self._clock())
+
+    def begin(self, key):
+        """Reserva atomicamente uma falha provisória; sucesso limpa o orçamento."""
+        with self._lock:
             now = self._clock()
-            state = self._states.setdefault(key, _State())
-            if state.lock_until > now:
-                return
-            while state.failures and state.failures[0] <= now - self.window:
-                state.failures.popleft()
-            state.failures.append(now)
-            if len(state.failures) >= self.max_failures:
-                state.penalty = min(self.max_lockout, state.penalty * 2 or self.window)
-                state.lock_until = now + state.penalty
-                state.failures.clear()
+            state = self._states.get(key)
+            if state and state.lock_until > now:
+                return math.ceil(state.lock_until - now)
+            self._fail(key, now)
+            return Reservation(self, key, self._states[key])
+
+    def apply_unlock(self, timestamp):
+        with self._lock:
+            if timestamp > getattr(self, "_last_unlock", float("-inf")):
+                self._states.clear()
+                self._last_unlock = timestamp
 
     def success(self, key):
         self.reset(key)
@@ -54,6 +76,16 @@ class Budget:
                 self._states.clear()
             else:
                 self._states.pop(key, None)
+
+
+class Reservation:
+    def __init__(self, budget, key, state):
+        self._budget, self._key, self._state = budget, key, state
+
+    def success(self):
+        with self._budget._lock:
+            if self._budget._states.get(self._key) is self._state:
+                self._budget._states.pop(self._key)
 
 
 class CreationRate:
@@ -95,10 +127,18 @@ class ScryptSlot:
 
     def __init__(self, timeout=5):
         self.timeout = timeout
-        self._semaphore = threading.Semaphore(1)
+        self._semaphore = threading.BoundedSemaphore(1)
+        self._waiting = threading.BoundedSemaphore(4)
 
     def acquire(self, timeout=None) -> bool:
-        return self._semaphore.acquire(timeout=self.timeout if timeout is None else timeout)
+        if self._semaphore.acquire(blocking=False):
+            return True
+        if not self._waiting.acquire(blocking=False):
+            return False
+        try:
+            return self._semaphore.acquire(timeout=self.timeout if timeout is None else timeout)
+        finally:
+            self._waiting.release()
 
     def release(self):
         self._semaphore.release()

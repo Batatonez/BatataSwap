@@ -7,7 +7,7 @@ import secrets
 import unicodedata
 from importlib.resources import files
 
-COMMON_PASSWORDS_SHA256 = "76727f6eb25eda1d4faf612f9dcad8927e6d9ea446d2bdb4073a82735e1326c2"
+COMMON_PASSWORDS_SHA256 = "f326484c490963ac4e3cd9cfbaae660c08e18f4eb2eebed44353132654c5ff32"
 
 
 def _common_passwords():
@@ -24,7 +24,14 @@ def validate_new_password(pw: str) -> str:
     pw = unicodedata.normalize("NFC", pw)
     if not 12 <= len(pw) <= 1024:
         raise ValueError("A senha deve ter entre 12 e 1024 caracteres.")
-    if pw.strip().casefold() in _common_passwords():
+    folded = pw.strip().casefold()
+    sequences = ("0123456789", "abcdefghijklmnopqrstuvwxyz", "qwertyuiopasdfghjklzxcvbnm")
+    trivial = len(set(folded)) <= 1
+    for sequence in sequences:
+        for pattern in (sequence, sequence[::-1]):
+            repeated = pattern * (len(folded) // len(pattern) + 2)
+            trivial |= folded in repeated
+    if trivial or folded in _common_passwords():
         raise ValueError("Escolha uma senha menos comum.")
     try:
         pw.encode("utf-8")

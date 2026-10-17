@@ -62,3 +62,21 @@ def test_nfc_and_integrity(monkeypatch):
     monkeypatch.setattr(passwords, "COMMON_PASSWORDS_SHA256", "0" * 64)
     with pytest.raises(RuntimeError, match="alterada"):
         passwords.validate_new_password(PASSWORD)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["a" * 12, "123456789012", "abcdefghijkl", "qwertyuiopas", "senha12345678", "batata12345678"],
+)
+def test_trivial_patterns(value):
+    with pytest.raises(ValueError):
+        passwords.validate_new_password(value)
+
+
+def test_resource_data():
+    from importlib.resources import files
+
+    payload = files("batataswap.auth").joinpath("data/common_passwords.txt").read_bytes()
+    assert hashlib.sha256(payload).hexdigest() == passwords.COMMON_PASSWORDS_SHA256
+    assert len(passwords._common_passwords()) >= 300
+    assert all(len(pw) >= 12 for pw in passwords._common_passwords())

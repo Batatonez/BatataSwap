@@ -42,7 +42,7 @@ def verify(secret: bytes, code: str, now: float, last_step: int) -> int | None:
 
 
 def provisioning_uri(secret: bytes, account: str = "davi", issuer: str = "BatataSwap") -> str:
-    label = quote(f"{issuer}:{account}", safe="")
+    label = quote(f"{issuer}:{account}", safe=":")
     query = urlencode(
         {
             "secret": base64.b32encode(secret).decode().rstrip("="),

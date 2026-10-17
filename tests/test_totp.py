@@ -46,3 +46,8 @@ def test_uri_and_terminal():
     assert parse_qs(urlsplit(uri).query)["digits"] == ["6"]
     assert "%20" in uri
     assert qr_text(uri)
+
+
+def test_uri_preserves_label_separator():
+    uri = provisioning_uri(b"12345678901234567890", account="davi/teste", issuer="Batata Swap")
+    assert urlsplit(uri).path == "/Batata%20Swap:davi%2Fteste"
