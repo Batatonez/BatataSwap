@@ -1,4 +1,6 @@
 import sqlite3
+import threading
+from pathlib import Path
 
 import pytest
 
@@ -472,3 +474,185 @@ def test_export_all_includes_everything(conn, keyring, limits, a1):
     conv = data["conversas"][0]
     assert conv["nome"] == "Conv X" and conv["mensagens"][0]["texto"] == "oi"
     assert conv["lotes"][0]["enviado_por"] == "conta-1"
+
+
+# --- revisão: checkpoint, teto do banco, snapshot do export, origem, busca, concorrência ---
+
+
+def db_path(conn):
+    return Path(conn.execute("PRAGMA database_list").fetchone()[2])
+
+
+def run_threads(conn, n, fn):
+    """Roda ``fn(conexão_própria, i)`` em n threads ao mesmo tempo. Devolve [("ok"|"err", valor)]."""
+    path = db_path(conn)
+    barrier = threading.Barrier(n)
+    results = [None] * n
+
+    def work(i):
+        c = connect(path)
+        try:
+            barrier.wait()
+            try:
+                results[i] = ("ok", fn(c, i))
+            except Exception as exc:  # noqa: BLE001
+                results[i] = ("err", exc)
+        finally:
+            c.close()
+
+    threads = [threading.Thread(target=work, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return results
+
+
+def test_purge_checkpoint_pending_with_concurrent_reader(conn, keyring, limits, a1):
+    ctx = save(conn, keyring, limits, a1, resumo=SECRET)
+    conn.execute("PRAGMA busy_timeout=0")
+    reader = connect(db_path(conn))
+    reader.execute("BEGIN")
+    reader.execute("SELECT COUNT(*) FROM projects").fetchall()  # segura um snapshot do WAL
+    out = memory.purge(conn, CLI, ctx["id"], now=T0)
+    assert out["limpeza_fisica"] == "pendente"
+    assert conn.execute("SELECT value FROM meta WHERE key='checkpoint_pendente'").fetchone()[
+        0
+    ] == str(T0)
+    assert memory.retry_checkpoint(conn, now=T0 + 1) == "pendente"
+    reader.execute("ROLLBACK")
+    reader.close()
+    assert memory.sweep_trash(conn, now=T0 + 2) == 0  # a faxina refaz o checkpoint
+    assert (
+        conn.execute("SELECT COUNT(*) FROM meta WHERE key='checkpoint_pendente'").fetchone()[0] == 0
+    )
+    assert memory.retry_checkpoint(conn, now=T0 + 3) == "ok"
+    ctx2 = save(conn, keyring, limits, a1, projeto="Outro")
+    assert memory.purge(conn, CLI, ctx2["id"], now=T0 + 4)["limpeza_fisica"] == "ok"
+
+
+def test_database_size_cap_rolls_back(conn, keyring, a1):
+    current = memory.database_bytes(conn)
+    lim = Limits(database_bytes=current + 10, stored_bytes=current + 10)
+    with pytest.raises(memory.LimitExceeded) as exc:
+        save(conn, keyring, lim, a1, resumo="x" * 100)
+    assert "banco" in str(exc.value)
+    with pytest.raises(memory.LimitExceeded):
+        memory.add_preference(conn, keyring, lim, a1, "y" * 100, now=T0)
+    from batataswap import conversations
+
+    with pytest.raises(memory.LimitExceeded):
+        conversations.append_messages(
+            conn, keyring, lim, a1, "Fio", [{"autor": "claude", "texto": "z" * 100}], now=T0
+        )
+    for table in (
+        "projects",
+        "contexts",
+        "preferences",
+        "conversations",
+        "messages",
+        "daily_usage",
+    ):
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+
+
+def test_export_is_a_single_snapshot(conn, keyring, limits, a1, monkeypatch):
+    from batataswap import conversations
+
+    conversations.append_messages(
+        conn, keyring, limits, a1, "Fio", [{"autor": "claude", "texto": "antes"}], now=T0
+    )
+    path = db_path(conn)
+    original = conversations.export_conversations
+
+    def racing(c, k):
+        w = connect(path)
+        conversations.append_messages(
+            w, keyring, limits, a1, "Fio", [{"autor": "claude", "texto": "tarde"}], now=T0 + 1
+        )
+        save(w, keyring, limits, a1, projeto="Novo Depois", now=T0 + 1)
+        w.close()
+        return original(c, k)
+
+    monkeypatch.setattr(conversations, "export_conversations", racing)
+    data = memory.export_all(conn, keyring)
+    assert [m["texto"] for m in data["conversas"][0]["mensagens"]] == ["antes"]
+    assert data["projetos"] == []
+    assert not conn.in_transaction
+    monkeypatch.setattr(conversations, "export_conversations", original)
+    assert len(memory.export_all(conn, keyring)["conversas"][0]["mensagens"]) == 2
+    conn.execute("BEGIN")
+    with pytest.raises(memory.InvalidInput):
+        memory.export_all(conn, keyring)
+    conn.execute("ROLLBACK")
+
+
+def test_export_keeps_origin_identity_of_same_label(conn, keyring, limits):
+    from batataswap import conversations
+
+    first = _grant(conn, "grant_dddddddddddddddd", "conta-1")
+    conn.execute("UPDATE oauth_grants SET revoked_at = 5 WHERE id = ?", (first.grant_id,))
+    second = _grant(conn, "grant_eeeeeeeeeeeeeeee", "conta-1")
+    for actor in (first, second):
+        save(conn, keyring, limits, actor, projeto=f"P{actor.grant_id}")
+        memory.add_preference(conn, keyring, limits, actor, f"pref {actor.grant_id}", now=T0)
+        conversations.append_messages(
+            conn, keyring, limits, actor, "Fio", [{"autor": "claude", "texto": "m"}], now=T0
+        )
+    memory.add_preference(conn, keyring, limits, CLI, "da cli", now=T0)
+    data = memory.export_all(conn, keyring)
+    ctx_origins = [p["contextos"][0]["origem"] for p in data["projetos"]]
+    assert ctx_origins == ["grant_dddddddddddddddd", "grant_eeeeeeeeeeeeeeee"]
+    assert [p["origem"] for p in data["preferencias"]] == [*ctx_origins, "cli"]
+    assert all(p["enviado_por"] == "conta-1" for p in data["preferencias"][:2])
+    conv = data["conversas"][0]
+    assert [b["origem"] for b in conv["lotes"]] == ctx_origins
+    assert [m["origem"] for m in conv["mensagens"]] == ctx_origins
+
+
+def test_search_many_skeletons_bounded_work(conn, keyring, a1, monkeypatch):
+    lim = Limits(search_block_rows=5, search_seconds=2)
+    for i in range(23):
+        memory.add_preference(conn, keyring, lim, a1, f"lixo {i}", now=T0)
+    for (pid,) in conn.execute("SELECT public_id FROM preferences").fetchall():
+        memory.purge(conn, CLI, pid, now=T0)
+    memory.add_preference(conn, keyring, lim, a1, "o tesouro", now=T0)
+    blocks = []
+    real = memory._search_rows
+
+    def counting(c, key, low, high):
+        assert high - low <= 5  # nunca varre além de um bloco
+        blocks[-1] += 1
+        return real(c, key, low, high)
+
+    monkeypatch.setattr(memory, "_search_rows", counting)
+    clock, cursor, found, calls = FakeClock(), None, [], 0
+    while True:
+        blocks.append(0)
+        res = memory.search(conn, keyring, lim, a1, "tesouro", 5, cursor, now=T0, clock=clock)
+        calls += 1
+        found += res["resultados"]
+        cursor = res["proximo_cursor"]
+        if cursor is None:
+            break
+        assert calls < 30
+    assert len(found) == 1 and calls > 1 and max(blocks) <= 2
+
+
+def test_concurrent_daily_balance(conn, keyring, a1):
+    lim = Limits(daily_writes=3)
+    res = run_threads(conn, 8, lambda c, i: save(c, keyring, lim, a1, projeto=f"P{i}"))
+    assert sum(1 for k, _ in res if k == "ok") == 3
+    assert all(isinstance(v, memory.LimitExceeded) for k, v in res if k == "err")
+    assert conn.execute("SELECT writes FROM daily_usage").fetchone()[0] == 3
+    assert conn.execute("SELECT COUNT(*) FROM contexts").fetchone()[0] == 3
+
+
+def test_concurrent_delete_code_consumed_once(conn, keyring, limits, a1):
+    ctx = save(conn, keyring, limits, a1)
+    code = memory.request_delete(conn, keyring, a1, ctx["id"], now=T0)["codigo"]
+    res = run_threads(
+        conn, 6, lambda c, i: memory.confirm_delete(c, a1, ctx["id"], code, now=T0 + 1)
+    )
+    assert sum(1 for k, _ in res if k == "ok") == 1
+    assert all(isinstance(v, memory.InvalidConfirmation) for k, v in res if k == "err")

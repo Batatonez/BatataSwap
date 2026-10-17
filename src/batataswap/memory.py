@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import secrets
 import sqlite3
 import time
@@ -271,6 +272,20 @@ def stored_bytes(conn: sqlite3.Connection) -> int:
     return total
 
 
+def database_bytes(conn: sqlite3.Connection) -> int:
+    """Estimativa do tamanho do banco inteiro: páginas do arquivo principal + arquivo -wal."""
+    pages = conn.execute("PRAGMA page_count").fetchone()[0]
+    page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+    total = pages * page_size
+    for row in conn.execute("PRAGMA database_list"):
+        if row[1] == "main" and row[2]:
+            try:
+                total += os.stat(row[2] + "-wal").st_size
+            except OSError:
+                pass
+    return total
+
+
 def charge_write(conn: sqlite3.Connection, limits: Limits, now: int, size: int) -> None:
     """Confere os limites diário e total e registra a escrita. Chamar dentro da transação."""
     day = time.strftime("%Y-%m-%d", time.gmtime(now))
@@ -280,6 +295,10 @@ def charge_write(conn: sqlite3.Connection, limits: Limits, now: int, size: int) 
         raise LimitExceeded(f"Limite diário de {limits.daily_writes} escritas atingido.")
     if written + size > limits.daily_bytes:
         raise LimitExceeded("Limite diário de bytes gravados atingido.")
+    if database_bytes(conn) + size > limits.database_bytes:
+        raise LimitExceeded(
+            "O banco chegou ao tamanho máximo. Exporte e limpe memórias antes de salvar mais."
+        )
     if stored_bytes(conn) + size > limits.stored_bytes:
         raise LimitExceeded(
             "O total guardado chegou ao limite. Exporte e limpe memórias antes de salvar mais."
@@ -620,33 +639,37 @@ def _snippet(parts: list[str], needle: str) -> str:
     return (parts[0] if parts else "")[:_SNIPPET_CHARS]
 
 
-def _search_rows(conn: sqlite3.Connection, key: str, last: int, block: int) -> list[tuple]:
+_SEARCH_TABLES = {"c": "contexts", "p": "preferences", "m": "messages"}
+
+
+def _search_rows(conn: sqlite3.Connection, key: str, low: int, high: int) -> list[tuple]:
+    """Linhas vivas com ``low < id <= high`` (faixa limitada: o trabalho de SQL é previsível)."""
     if key == "c":
         return conn.execute(
             "SELECT c.id, c.public_id, c.version, c.created_at, c.source_label, g.public_id, "
             "c.content_ct, p.public_id, p.name_ct FROM contexts c "
             "JOIN projects p ON p.id = c.project_id "
             "LEFT JOIN oauth_grants g ON g.id = c.grant_id "
-            "WHERE c.id > ? AND c.trashed_at IS NULL AND c.purged_at IS NULL "
-            "AND p.trashed_at IS NULL AND p.purged_at IS NULL ORDER BY c.id LIMIT ?",
-            (last, block),
+            "WHERE c.id > ? AND c.id <= ? AND c.trashed_at IS NULL AND c.purged_at IS NULL "
+            "AND p.trashed_at IS NULL AND p.purged_at IS NULL ORDER BY c.id",
+            (low, high),
         ).fetchall()
     if key == "p":
         return conn.execute(
             "SELECT p.id, p.public_id, p.version, p.created_at, p.source_label, g.public_id, "
             "p.text_ct FROM preferences p LEFT JOIN oauth_grants g ON g.id = p.grant_id "
-            "WHERE p.id > ? AND p.trashed_at IS NULL AND p.purged_at IS NULL "
-            "ORDER BY p.id LIMIT ?",
-            (last, block),
+            "WHERE p.id > ? AND p.id <= ? AND p.trashed_at IS NULL AND p.purged_at IS NULL "
+            "ORDER BY p.id",
+            (low, high),
         ).fetchall()
     return conn.execute(
         "SELECT m.id, m.public_id, m.seq, m.claimed_author, m.created_at, m.text_ct, "
         "b.public_id, g.public_id, g.label, cv.public_id, cv.name_ct FROM messages m "
         "JOIN conversations cv ON cv.id = m.conversation_id "
         "JOIN message_batches b ON b.id = m.batch_id JOIN oauth_grants g ON g.id = b.grant_id "
-        "WHERE m.id > ? AND m.trashed_at IS NULL AND m.purged_at IS NULL "
-        "AND cv.trashed_at IS NULL AND cv.purged_at IS NULL ORDER BY m.id LIMIT ?",
-        (last, block),
+        "WHERE m.id > ? AND m.id <= ? AND m.trashed_at IS NULL AND m.purged_at IS NULL "
+        "AND cv.trashed_at IS NULL AND cv.purged_at IS NULL ORDER BY m.id",
+        (low, high),
     ).fetchall()
 
 
@@ -762,14 +785,25 @@ def search(
     partial = False
     stop = False
     started = clock()
+    blocks = 0
     for key in _SEARCH_KEYS:
         if stop:
             break
+        max_id = conn.execute(f"SELECT COALESCE(MAX(id), 0) FROM {_SEARCH_TABLES[key]}").fetchone()[
+            0
+        ]
         while not stop and not state[key][1]:
-            rows = _search_rows(conn, key, state[key][0], limits.search_block_rows)
-            if not rows:
+            # O relógio é conferido antes de cada bloco (menos do primeiro: sempre há progresso).
+            if blocks and clock() - started >= limits.search_seconds:
+                stop, partial = True, True
+                break
+            low = state[key][0]
+            if low >= max_id:
                 state[key][1] = True
                 break
+            high = min(low + limits.search_block_rows, max_id)
+            rows = _search_rows(conn, key, low, high)
+            blocks += 1
             for row in rows:
                 state[key][0] = row[0]
                 hit = _examine(keyring, key, row, needle)
@@ -781,6 +815,8 @@ def search(
                 if clock() - started >= limits.search_seconds:
                     stop, partial = True, True
                     break
+            if not stop:
+                state[key][0] = high  # faixa inteira examinada
     next_cursor = None
     if not all(state[k][1] for k in _SEARCH_KEYS):
         next_cursor = encode_cursor(keyring, "busca", actor, tag, dict(state), now)
@@ -1056,8 +1092,26 @@ def _purge_rows(conn: sqlite3.Connection, table: str, row_id: int, now: int) -> 
     return count
 
 
-def _checkpoint(conn: sqlite3.Connection) -> None:
-    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+def _checkpoint(conn: sqlite3.Connection, now: int) -> str:
+    """``wal_checkpoint(TRUNCATE)`` conferido. Ocupado → marca ``checkpoint_pendente`` em meta."""
+    row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    if row is not None and row[0] == 0:
+        conn.execute("DELETE FROM meta WHERE key = 'checkpoint_pendente'")
+        return "ok"
+    conn.execute(
+        "INSERT INTO meta(key, value) VALUES ('checkpoint_pendente', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (str(now),),
+    )
+    return "pendente"
+
+
+def retry_checkpoint(conn: sqlite3.Connection, *, now: int) -> str:
+    """Refaz o checkpoint se algum expurgo o deixou pendente. Devolve ``ok`` ou ``pendente``."""
+    pending = conn.execute("SELECT 1 FROM meta WHERE key = 'checkpoint_pendente'").fetchone()
+    if not pending:
+        return "ok"
+    return _checkpoint(conn, now)
 
 
 def purge(conn: sqlite3.Connection, actor: Actor, public_id: str, *, now: int) -> dict[str, Any]:
@@ -1070,8 +1124,8 @@ def purge(conn: sqlite3.Connection, actor: Actor, public_id: str, *, now: int) -
             raise NotFound("Registro não encontrado.")
         count = _purge_rows(conn, table, row[0], now)
         audit(conn, now, "expurgar", None, public_id)
-    _checkpoint(conn)
-    return {"id": public_id, "tipo": kind, "expurgados": count}
+    physical = _checkpoint(conn, now)
+    return {"id": public_id, "tipo": kind, "expurgados": count, "limpeza_fisica": physical}
 
 
 def sweep_trash(conn: sqlite3.Connection, *, now: int) -> int:
@@ -1093,7 +1147,9 @@ def sweep_trash(conn: sqlite3.Connection, *, now: int) -> int:
         if total:
             audit(conn, now, "faxina_lixeira", None, None)
     if total:
-        _checkpoint(conn)
+        _checkpoint(conn, now)
+    else:
+        retry_checkpoint(conn, now=now)
     return total
 
 
@@ -1112,7 +1168,24 @@ def _skeleton(trashed_at: int | None, trash_root: str | None, purged_at: int | N
 
 
 def export_all(conn: sqlite3.Connection, keyring: Keyring) -> dict[str, Any]:
-    """Tudo decifrado (vivo, lixeira e esqueletos expurgados). O resultado está em TEXTO PURO."""
+    """Tudo decifrado (vivo, lixeira e esqueletos expurgados). O resultado está em TEXTO PURO.
+
+    Roda numa única transação de leitura (um só instante do banco). Recusa se a conexão já
+    tem uma transação aberta.
+    """
+    if conn.in_transaction:
+        raise InvalidInput(
+            "Há uma transação aberta nesta conexão; o export precisa de um snapshot."
+        )
+    conn.execute("BEGIN")
+    try:
+        return _export_snapshot(conn, keyring)
+    finally:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+
+
+def _export_snapshot(conn: sqlite3.Connection, keyring: Keyring) -> dict[str, Any]:
     from batataswap import conversations  # import tardio
 
     projects = []
@@ -1133,6 +1206,7 @@ def export_all(conn: sqlite3.Connection, keyring: Keyring) -> dict[str, Any]:
                 "versao": row[1],
                 "salvo_em": iso(row[2]),
                 "enviado_por": row[3],
+                "origem": row[4] or row[3],
                 "tamanho": row[6],
                 **_skeleton(row[7], row[8], row[9]),
             }
@@ -1167,6 +1241,7 @@ def export_all(conn: sqlite3.Connection, keyring: Keyring) -> dict[str, Any]:
             "versao": row[1],
             "salvo_em": iso(row[2]),
             "enviado_por": row[3],
+            "origem": row[4] or row[3],
             "substitui": row[10],
             "tamanho": row[6],
             **_skeleton(row[7], row[8], row[9]),

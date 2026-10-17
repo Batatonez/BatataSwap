@@ -21,7 +21,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - T03: código pronto e revisado (`spike/`); Davi instalando no servidor.
 - T04: **pronta** (revisada, correções aplicadas).
 - T06: **pronta** (revisada; correções aplicadas). Novas assinaturas: `create_owner(..., confirm_code, now)`, `unlock(conn, now)` (grava `meta.unlock_requested_at`).
-- T09: commitada; revisão do gpt-6.1-sol pediu 4 correções (checkpoint, teto do banco, export em snapshot, grant no export) — em andamento com worker-sonnet (sem commit; se cair, refazer pela linha do DELEGATION_LOG).
+- T09: **pronta** (revisada; correções aplicadas). `retry_checkpoint` deve ser chamado pela faxina (T12).
 - T07 (borda HTTP) com worker-opus, sem commit ainda. Notas do worker pra T10: `now` é keyword-only; listas/busca recebem `actor`; `restore`/`purge` só sem grant (CLI/painel); `read_conversation` devolve `proximo_antes_de`; cada chamada de escrita conta 1 no limite diário e os bytes são o texto puro.
 - T03 em andamento com o Davi: spike no ar no Funnel (`batatarp…ts.net`, 443). **Transporte validado** (conta 1 web + Claude Code web: `ping` ok; protocolo 2026-07-28, sem Origin, Host sem porta — ARQUITETURA §1.0). Falta: conector `/protegido/mcp` pra pegar o client_id do CIMD; testar no app do celular e na conta 2. **Lembrar de desligar o Funnel e parar o spike no fim** (`sudo tailscale funnel --https=443 off`; `pkill -f spike/servidor.py`).
 - T05: **pronta** (revisada, correções aplicadas). Conferir na T14/T17 que o systemd entrega a credencial com dono do serviço e modo 0400 (o crypto recusa 0440/ACL).

@@ -402,6 +402,7 @@ def export_conversations(conn: sqlite3.Connection, keyring: Keyring) -> list[dic
             {
                 "id": r[0],
                 "enviado_por": r[1],
+                "origem": r[6],
                 "criado_em": iso(r[2]),
                 "chave": r[3],
                 "first_seq": r[4],
@@ -409,7 +410,7 @@ def export_conversations(conn: sqlite3.Connection, keyring: Keyring) -> list[dic
             }
             for r in conn.execute(
                 "SELECT b.public_id, g.label, b.created_at, b.client_batch_key, b.first_seq, "
-                "b.last_seq FROM message_batches b JOIN oauth_grants g ON g.id = b.grant_id "
+                "b.last_seq, g.public_id FROM message_batches b JOIN oauth_grants g ON g.id = b.grant_id "
                 "WHERE b.conversation_id = ? ORDER BY b.id",
                 (cid,),
             )
@@ -427,6 +428,7 @@ def export_conversations(conn: sqlite3.Connection, keyring: Keyring) -> list[dic
                 "seq": row[1],
                 "autor_alegado": row[2],
                 "enviado_por": row[11],
+                "origem": row[10],
                 "lote": row[9],
                 "salvo_em": iso(row[3]),
                 "tamanho": row[5],

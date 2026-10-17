@@ -15,6 +15,7 @@ from tests.test_memory import (  # noqa: F401
     conn,
     keyring,
     limits,
+    run_threads,
 )
 
 
@@ -274,3 +275,45 @@ def test_errors_never_carry_content(conn, keyring, limits, a1):
             fn()
         errors.append(str(exc.value))
     assert errors and all(SECRET not in e and "Secreta" not in e for e in errors)
+
+
+def test_concurrent_appends_get_contiguous_seq(conn, keyring, limits, a1, a2):
+    def work(c, i):
+        actor = a1 if i % 2 else a2
+        return append(c, keyring, limits, actor, msgs(*[("claude", f"{i}-{j}") for j in range(3)]))
+
+    res = run_threads(conn, 8, work)
+    assert all(k == "ok" for k, _ in res)
+    seqs = sorted(s for _, r in res for s in range(r["first_seq"], r["last_seq"] + 1))
+    assert seqs == list(range(1, 25))
+    assert conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 1
+    assert conn.execute("SELECT total_bytes FROM conversations").fetchone()[0] == 24 * 3
+
+
+def test_concurrent_same_batch_key_writes_once(conn, keyring, limits, a1):
+    m = msgs(("claude", "a"), ("usuario", "b"))
+    res = run_threads(conn, 6, lambda c, i: append(c, keyring, limits, a1, m, lote="k"))
+    assert all(k == "ok" for k, _ in res)
+    assert sum(1 for _, r in res if not r["repetido"]) == 1
+    assert {(r["first_seq"], r["last_seq"]) for _, r in res} == {(1, 2)}
+    assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 2
+
+
+def test_concurrent_continua_de_only_one_wins(conn, keyring, limits, a1, a2):
+    res = run_threads(
+        conn,
+        6,
+        lambda c, i: append(
+            c, keyring, limits, a1 if i % 2 else a2, msgs(("claude", f"m{i}")), continua_de=0
+        ),
+    )
+    assert sum(1 for k, _ in res if k == "ok") == 1
+    assert all(isinstance(v, memory.SequenceConflict) for k, v in res if k == "err")
+    assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
+
+
+def test_concurrent_last_daily_write(conn, keyring, a1):
+    lim = Limits(daily_writes=1)
+    res = run_threads(conn, 5, lambda c, i: append(c, keyring, lim, a1, msgs(("claude", "x"))))
+    assert sum(1 for k, _ in res if k == "ok") == 1
+    assert all(isinstance(v, memory.LimitExceeded) for k, v in res if k == "err")
