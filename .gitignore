@@ -15,7 +15,7 @@ config.local.*
 *.pem
 *.key
 data/
-!src/batatalink/hub/data/
+!src/batataswap/auth/data/
 
 # Rascunho do orquestrador (briefs e resultados do Codex)
 .orchestrator/
@@ -30,3 +30,6 @@ Thumbs.db
 
 # Worktrees dos workers
 .claude/worktrees/
+
+# Vercel
+.vercel/
