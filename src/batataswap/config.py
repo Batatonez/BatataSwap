@@ -2,40 +2,47 @@
 
 import ipaddress
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 
 class ConfigError(ValueError):
     """Configuração ausente ou inválida."""
 
 
-def _https(value: object, *, origin: bool = True) -> str:
-    if not isinstance(value, str) or any(c.isspace() or ord(c) < 32 for c in value):
-        raise ConfigError("URL HTTPS inválida na configuração.")
+def _https(value: object, *, name: str, origin: bool = True) -> str:
     try:
+        if not isinstance(value, str) or any(c.isspace() or ord(c) < 32 for c in value):
+            raise ValueError
         url = urlsplit(value)
-        if (
-            url.scheme != "https"
-            or not url.hostname
-            or url.username is not None
-            or url.password is not None
-            or url.query
-            or url.fragment
-            or "?" in value
-            or "#" in value
-            or "\\" in value
-            or url.port == 443
-            or (origin and url.path)
-            or url.netloc.endswith(":")
+        host = url.hostname
+        port = url.port
+        if not host or "%" in url.netloc:
+            raise ValueError
+        try:
+            address = ipaddress.ip_address(host)
+            host = f"[{host}]" if address.version == 6 else host
+        except ValueError:
+            if not re.fullmatch(r"(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))*", host):
+                raise ValueError
+        canonical = f"https://{host}" + (f":{port}" if port else "")
+        if port is not None and (not 1 <= port <= 65535 or port == 443):
+            raise ValueError
+        if origin:
+            if value != canonical:
+                raise ValueError
+        elif (
+            not url.path
+            or value != canonical + url.path
+            or any(segment in (".", "..") for segment in unquote(url.path).split("/"))
+            or "\\" in unquote(url.path)
         ):
             raise ValueError
-    except ValueError:
-        raise ConfigError(
-            "URL HTTPS inválida na configuração (porta 443 deve ser omitida)."
-        ) from None
+    except (ValueError, TypeError):
+        raise ConfigError(f"{name}: URL HTTPS canônica inválida.") from None
     return value
 
 
@@ -65,11 +72,18 @@ class Limits:
     search_seconds: int = 2
 
     def __post_init__(self):
-        if any(
-            type(getattr(self, f.name)) is not int or getattr(self, f.name) <= 0
-            for f in fields(self)
+        for f in fields(self):
+            if type(getattr(self, f.name)) is not int or getattr(self, f.name) <= 0:
+                raise ConfigError(f"limits.{f.name}: deve ser inteiro positivo.")
+        for left, right, strict in (
+            ("message_batch_bytes", "mcp_body_bytes", True),
+            ("unauthenticated_mcp_body_bytes", "mcp_body_bytes", False),
+            ("stored_bytes", "database_bytes", False),
         ):
-            raise ConfigError("Limites devem ser números inteiros positivos.")
+            if getattr(self, left) > getattr(self, right) or (
+                strict and getattr(self, left) == getattr(self, right)
+            ):
+                raise ConfigError(f"limits.{left}: incompatível com limits.{right}.")
 
 
 @dataclass(frozen=True)
@@ -81,34 +95,45 @@ class Config:
     backup_dir: Path = Path("/var/backups/batataswap")
     vercel_origin: str | None = None
     painel_client_id: str = "painel-vercel"
-    allowed_cimd_client_ids: list[str] = field(default_factory=list)
-    allowed_mcp_origins: list[str] = field(default_factory=list)
-    account_labels: list[str] = field(default_factory=lambda: ["conta-1", "conta-2"])
+    allowed_cimd_client_ids: tuple[str, ...] = field(default_factory=tuple)
+    allowed_mcp_origins: tuple[str, ...] = field(default_factory=tuple)
+    account_labels: tuple[str, ...] = field(default_factory=lambda: ("conta-1", "conta-2"))
     limits: Limits = field(default_factory=Limits)
 
     def __post_init__(self):
-        _https(self.public_origin)
+        _https(self.public_origin, name="public_origin")
         if self.vercel_origin is not None:
-            _https(self.vercel_origin)
+            _https(self.vercel_origin, name="vercel_origin")
         try:
-            if not ipaddress.ip_address(self.bind_host).is_loopback:
+            if (
+                not isinstance(self.bind_host, str)
+                or not ipaddress.ip_address(self.bind_host).is_loopback
+            ):
                 raise ValueError
         except (ValueError, TypeError):
-            raise ConfigError("O endereço de escuta deve ser um IP de loopback.") from None
+            raise ConfigError("bind_host: deve ser um IP de loopback.") from None
         if type(self.port) is not int or not 1 <= self.port <= 65535:
-            raise ConfigError("Porta de escuta inválida.")
+            raise ConfigError("port: porta de escuta inválida.")
         for name in ("allowed_cimd_client_ids", "allowed_mcp_origins", "account_labels"):
             values = getattr(self, name)
-            if not isinstance(values, list) or any(not isinstance(v, str) or not v for v in values):
-                raise ConfigError("Lista inválida na configuração.")
+            if not isinstance(values, (list, tuple)) or any(
+                not isinstance(v, str) or not v for v in values
+            ):
+                raise ConfigError(f"{name}: lista inválida.")
+            object.__setattr__(self, name, tuple(values))
         for value in self.allowed_cimd_client_ids:
-            _https(value, origin=False)
+            _https(value, name="allowed_cimd_client_ids", origin=False)
         for value in self.allowed_mcp_origins:
-            _https(value)
+            _https(value, name="allowed_mcp_origins")
+        if len(set(self.account_labels)) != len(self.account_labels) or any(
+            not re.fullmatch(r"[a-z0-9-]{1,32}", label) or label in {"painel", "cli"}
+            for label in self.account_labels
+        ):
+            raise ConfigError("account_labels: rótulos inválidos ou duplicados.")
         if not isinstance(self.painel_client_id, str) or not self.painel_client_id:
-            raise ConfigError("Identificador do painel inválido.")
+            raise ConfigError("painel_client_id: identificador inválido.")
         if not isinstance(self.limits, Limits):
-            raise ConfigError("Tabela de limites inválida.")
+            raise ConfigError("limits: tabela inválida.")
         for name in ("data_dir", "backup_dir"):
             value = getattr(self, name)
             if (
@@ -116,7 +141,7 @@ class Config:
                 or not str(value)
                 or not Path(value).is_absolute()
             ):
-                raise ConfigError("Diretórios devem ser caminhos absolutos.")
+                raise ConfigError(f"{name}: deve ser caminho absoluto.")
             object.__setattr__(self, name, Path(value))
 
     @property
@@ -145,7 +170,17 @@ def load_config(path: Path | None = None) -> Config:
     try:
         with path.open("rb") as file:
             values = tomllib.load(file)
+        for name in values:
+            if name not in {f.name for f in fields(Config)}:
+                raise ConfigError(f"{name}: chave desconhecida.")
+        if "public_origin" not in values:
+            raise ConfigError("public_origin: campo obrigatório.")
         if "limits" in values:
+            if not isinstance(values["limits"], dict):
+                raise ConfigError("limits: tabela inválida.")
+            for name in values["limits"]:
+                if name not in {f.name for f in fields(Limits)}:
+                    raise ConfigError(f"limits.{name}: chave desconhecida.")
             values["limits"] = Limits(**values["limits"])
         return Config(**values)
     except ConfigError:

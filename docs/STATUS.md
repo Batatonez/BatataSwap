@@ -19,7 +19,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - Plano **aprovado** pelo Davi ("vai fazendo", 2026-10-17).
 - T01: arquitetura **v3.1** (achados das duas passadas do gpt-6-astra aplicados, ver §16 e §16.1). Considero T01 concluída: nenhum crítico aberto, importantes todos endereçados no texto. A conferência final do desenho fica na revisão de nível 4 (T16).
 - T03: código pronto e revisado (`spike/`); Davi instalando no servidor.
-- T04: commitado; revisão do worker-opus em andamento (se a sessão cair, refazer a revisão).
+- T04: **pronta** (revisada, correções aplicadas).
 - T05: **pronta** (revisada, correções aplicadas). Conferir na T14/T17 que o systemd entrega a credencial com dono do serviço e modo 0400 (o crypto recusa 0440/ACL).
 
 ## Decisões do Davi (2026-10-17)

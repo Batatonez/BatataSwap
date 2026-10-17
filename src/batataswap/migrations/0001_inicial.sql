@@ -16,7 +16,8 @@ CREATE TABLE projects (
   trash_root  TEXT,                              -- public_id da operação de apagar que mandou pra lixeira
   purged_at   INTEGER,
   CHECK (purged_at IS NULL OR name_ct IS NULL),
-  CHECK (purged_at IS NOT NULL OR name_ct IS NOT NULL)
+  CHECK (purged_at IS NOT NULL OR name_ct IS NOT NULL),
+  CHECK ((trashed_at IS NULL) = (trash_root IS NULL))
 ) STRICT;
 
 CREATE TABLE contexts (                          -- uma linha por versão; conteúdo nunca muda
@@ -32,7 +33,10 @@ CREATE TABLE contexts (                          -- uma linha por versão; conte
   trashed_at    INTEGER,                         -- na lixeira (apagar pelo MCP)
   trash_root    TEXT,
   purged_at     INTEGER,                         -- conteúdo destruído (painel/CLI/faxina)
-  UNIQUE (project_id, version)
+  UNIQUE (project_id, version),
+  CHECK (purged_at IS NULL OR content_ct IS NULL),
+  CHECK (purged_at IS NOT NULL OR content_ct IS NOT NULL),
+  CHECK ((trashed_at IS NULL) = (trash_root IS NULL))
 ) STRICT;
 
 CREATE TABLE preferences (
@@ -47,7 +51,10 @@ CREATE TABLE preferences (
   text_size      INTEGER NOT NULL,
   trashed_at     INTEGER,
   trash_root     TEXT,
-  purged_at      INTEGER
+  purged_at      INTEGER,
+  CHECK (purged_at IS NULL OR text_ct IS NULL),
+  CHECK (purged_at IS NOT NULL OR text_ct IS NOT NULL),
+  CHECK ((trashed_at IS NULL) = (trash_root IS NULL))
 ) STRICT;
 
 CREATE TABLE conversations (
@@ -63,7 +70,8 @@ CREATE TABLE conversations (
   trash_root  TEXT,
   purged_at   INTEGER,
   CHECK (purged_at IS NULL OR name_ct IS NULL),
-  CHECK (purged_at IS NOT NULL OR name_ct IS NOT NULL)
+  CHECK (purged_at IS NOT NULL OR name_ct IS NOT NULL),
+  CHECK ((trashed_at IS NULL) = (trash_root IS NULL))
 ) STRICT;
 
 CREATE TABLE message_batches (                   -- uma chamada de anexar_mensagens
@@ -92,7 +100,10 @@ CREATE TABLE messages (
   trashed_at       INTEGER,
   trash_root       TEXT,
   purged_at        INTEGER,
-  UNIQUE (conversation_id, seq)
+  UNIQUE (conversation_id, seq),
+  CHECK (purged_at IS NULL OR text_ct IS NULL),
+  CHECK (purged_at IS NOT NULL OR text_ct IS NOT NULL),
+  CHECK ((trashed_at IS NULL) = (trash_root IS NULL))
 ) STRICT;
 
 CREATE TABLE oauth_clients (
@@ -182,8 +193,12 @@ CREATE TABLE meta (                              -- restore_epoch, versão do es
   key TEXT PRIMARY KEY, value TEXT NOT NULL
 ) STRICT;
 
-CREATE INDEX contexts_project_version ON contexts(project_id, version);
-CREATE INDEX messages_conversation_seq ON messages(conversation_id, seq);
 CREATE INDEX oauth_tokens_grant ON oauth_tokens(grant_id);
 CREATE INDEX oauth_tokens_family ON oauth_tokens(family_id);
 CREATE INDEX audit_at ON audit(at);
+
+CREATE INDEX oauth_tokens_code ON oauth_tokens(code_hash);
+CREATE INDEX conversations_project ON conversations(project_id);
+CREATE INDEX contexts_trash_root ON contexts(trash_root) WHERE trash_root IS NOT NULL;
+CREATE INDEX conversations_trash_root ON conversations(trash_root) WHERE trash_root IS NOT NULL;
+CREATE INDEX messages_trash_root ON messages(trash_root) WHERE trash_root IS NOT NULL;
