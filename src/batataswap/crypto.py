@@ -16,6 +16,7 @@ Regra: nenhuma função daqui loga, imprime ou coloca em exceção chave, texto 
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import hmac
 import os
@@ -102,8 +103,10 @@ def load_master_key(credentials_dir: Path | None = None) -> bytes:
     """Lê a chave mestra binária (32 bytes) de ``<dir>/batataswap-master``.
 
     ``dir`` é o argumento ou, se ele faltar, ``$CREDENTIALS_DIRECTORY`` (systemd
-    ``LoadCredentialEncrypted=``). Recusa link simbólico, arquivo que não seja regular e
-    tamanho diferente de 32 bytes.
+    ``LoadCredentialEncrypted=``). Recusa link simbólico, arquivo que não seja regular (FIFO,
+    diretório…), tamanho diferente de 32 bytes e, no POSIX, arquivo acessível por grupo ou outros
+    ou com dono diferente do usuário atual ou do root. O systemd entrega a credencial com modo
+    0400 e dono do serviço, o que passa.
     """
     if credentials_dir is None:
         env = os.environ.get("CREDENTIALS_DIRECTORY")
@@ -121,18 +124,22 @@ def load_master_key(credentials_dir: Path | None = None) -> bytes:
     except OSError:
         raise CryptoError(f"não foi possível ler a chave mestra: {path}") from None
 
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    # O_NONBLOCK: abrir um FIFO sem escritor não trava. O_NOFOLLOW: um link criado depois da
+    # checagem acima falha com ELOOP. Flags ausentes no Windows viram 0.
+    flags = os.O_RDONLY
+    for name in ("O_BINARY", "O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC"):
+        flags |= getattr(os, name, 0)
     try:
         fd = os.open(path, flags)
     except FileNotFoundError:
         raise CryptoError(f"arquivo da chave mestra não encontrado: {path}") from None
-    except OSError:
-        # Inclui ELOOP (link simbólico trocado entre a checagem e a abertura).
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise CryptoError(f"a chave mestra não pode ser link simbólico: {path}") from None
         raise CryptoError(f"não foi possível ler a chave mestra: {path}") from None
 
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise CryptoError(f"a chave mestra precisa ser um arquivo comum: {path}")
+        _check_key_file(os.fstat(fd), path)
         data = b""
         while len(data) <= MASTER_KEY_SIZE:
             chunk = os.read(fd, MASTER_KEY_SIZE + 1 - len(data))
@@ -147,6 +154,21 @@ def load_master_key(credentials_dir: Path | None = None) -> bytes:
     if len(data) != MASTER_KEY_SIZE:
         raise CryptoError(f"a chave mestra precisa ter exatamente {MASTER_KEY_SIZE} bytes: {path}")
     return data
+
+
+def _check_key_file(st: os.stat_result, path: Path) -> None:
+    """Confere, pelo descritor já aberto, tipo, tamanho e (no POSIX) dono e permissões."""
+    if not stat.S_ISREG(st.st_mode):
+        raise CryptoError(f"a chave mestra precisa ser um arquivo comum: {path}")
+    if st.st_size != MASTER_KEY_SIZE:
+        raise CryptoError(f"a chave mestra precisa ter exatamente {MASTER_KEY_SIZE} bytes: {path}")
+    if os.name == "posix":
+        if st.st_mode & 0o077:
+            raise CryptoError(
+                f"a chave mestra não pode ser acessível por grupo ou outros (use 0400): {path}"
+            )
+        if st.st_uid not in (os.geteuid(), 0):
+            raise CryptoError(f"a chave mestra precisa pertencer ao usuário do serviço: {path}")
 
 
 def generate_master_key() -> bytes:

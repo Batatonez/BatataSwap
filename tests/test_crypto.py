@@ -2,8 +2,12 @@ import base64
 import hashlib
 import os
 import re
+import threading
 
 import pytest
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from batataswap import crypto
 from batataswap.crypto import (
@@ -293,6 +297,7 @@ def test_export_checksum_e_sha256():
 def _write_key(directory, data):
     path = directory / "batataswap-master"
     path.write_bytes(data)
+    path.chmod(0o600)
     return path
 
 
@@ -407,3 +412,111 @@ def test_new_public_id():
     for bad in ("proj", "PROJ_", "", "pr|_"):
         with pytest.raises(ValueError):
             new_public_id(bad)
+
+
+posix_only = pytest.mark.skipif(os.name != "posix", reason="só POSIX")
+
+
+@posix_only
+@pytest.mark.parametrize("mode", [0o400, 0o600])
+def test_load_master_key_modo_seguro(tmp_path, mode):
+    path = _write_key(tmp_path, MASTER)
+    path.chmod(mode)
+    assert load_master_key(tmp_path) == MASTER
+
+
+@posix_only
+@pytest.mark.parametrize("mode", [0o640, 0o644, 0o604, 0o440, 0o620])
+def test_load_master_key_modo_inseguro(tmp_path, mode):
+    path = _write_key(tmp_path, MASTER)
+    path.chmod(mode)
+    with pytest.raises(CryptoError, match="grupo ou outros"):
+        load_master_key(tmp_path)
+
+
+@posix_only
+def test_load_master_key_dono_errado(tmp_path, monkeypatch):
+    _write_key(tmp_path, MASTER)
+    real_fstat = os.fstat
+    other_uid = 54321 if os.geteuid() != 54321 else 54322
+
+    def fake_fstat(fd):
+        values = list(real_fstat(fd))
+        values[4] = other_uid  # posição de st_uid em os.stat_result
+        return os.stat_result(values)
+
+    monkeypatch.setattr(crypto.os, "fstat", fake_fstat)
+    with pytest.raises(CryptoError, match="pertencer"):
+        load_master_key(tmp_path)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="sem FIFO neste sistema")
+def test_load_master_key_fifo_nao_trava(tmp_path):
+    os.mkfifo(tmp_path / "batataswap-master", 0o600)
+    result = {}
+
+    def run():
+        try:
+            load_master_key(tmp_path)
+        except CryptoError as exc:
+            result["err"] = str(exc)
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(timeout=5)
+    assert not worker.is_alive(), "load_master_key travou abrindo um FIFO"
+    assert "arquivo comum" in result["err"]
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="sem O_NOFOLLOW")
+def test_load_master_key_symlink_trocado_depois_da_checagem(tmp_path, monkeypatch):
+    real = tmp_path / "real"
+    real.mkdir()
+    target = _write_key(real, MASTER)
+    link_dir = tmp_path / "creds"
+    link_dir.mkdir()
+    link = link_dir / "batataswap-master"
+
+    def racing_is_symlink(self):
+        # Simula a corrida: o link aparece logo depois da checagem.
+        if self == link and not os.path.lexists(link):
+            os.symlink(target, link)
+        return False
+
+    monkeypatch.setattr(crypto.Path, "is_symlink", racing_is_symlink)
+    with pytest.raises(CryptoError, match="link simbólico"):
+        load_master_key(link_dir)
+    assert os.path.islink(link)  # a corrida aconteceu de fato
+
+
+def test_hkdf_vetor_independente():
+    def expected(info):
+        return HKDF(algorithm=hashes.SHA256(), length=32, salt=b"batataswap/v1", info=info).derive(
+            MASTER
+        )
+
+    ring = Keyring(MASTER)
+    for purpose, info in [
+        ("projeto", b"mac-projeto"),
+        ("conversa", b"mac-conversa"),
+        ("lote", b"mac-lote"),
+        ("csrf", b"csrf"),
+        ("cursor", b"cursor"),
+    ]:
+        assert ring._mac[purpose] == expected(info)
+    for purpose, info in [("conteudo", b"aead-conteudo"), ("totp", b"aead-totp")]:
+        nonce = b"\x00" * 12
+        ct = AESGCM(expected(info)).encrypt(nonce, b"vetor", b"aad")
+        assert ring.open(purpose, b"\x01\x01" + nonce + ct, b"aad") == b"vetor"
+
+
+def test_import_rejeita_base32_nao_canonico():
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+    text = export_key(MASTER).replace("-", "")
+    body, checksum = text[:52], text[52:]
+    # O último caractere do corpo carrega 1 bit de dado e 4 de padding: muda só o padding.
+    last = alphabet.index(body[-1])
+    tweaked = body[:-1] + alphabet[last ^ 0b0001] + checksum
+    assert base64.b32decode(tweaked[:52] + "====") == MASTER  # mesmos bytes, mesmo checksum
+    with pytest.raises(CryptoError, match="formato"):
+        import_key(tweaked)
