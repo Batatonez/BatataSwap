@@ -1,0 +1,32 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Segredos e config local (nunca no git)
+.env
+.env.*
+config.local.*
+*.pem
+*.key
+data/
+!src/batatalink/hub/data/
+
+# Rascunho do orquestrador (briefs e resultados do Codex)
+.orchestrator/
+
+# Preferências pessoais do Claude Code
+CLAUDE.local.md
+.claude/settings.local.json
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Worktrees dos workers
+.claude/worktrees/
