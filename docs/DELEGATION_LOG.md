@@ -20,5 +20,7 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-17 | CLAUDE.md, AGENTS.md, workers, docs/ARQUITETURA.md v1 | 3 | orquestrador (Opus 5.5) | ok; falta revisão do gpt-6-astra (quem escreve não revisa) |
 | 2026-10-17 | ARQUITETURA.md v2 (sync de mensagens, painel Vercel, decisões do Davi) e PLANO.md | 3 | orquestrador (Opus 5.5) | ok |
 | 2026-10-17 | T01 Revisão da arquitetura v2 | 4 | gpt-6-astra (Codex) | ok: aprovar com correções (2 críticos, 13 importantes, 3 sugestões), achados excelentes |
-| 2026-10-17 | ARQUITETURA.md v3 aplicando os 18 achados | 3 | orquestrador (Opus 5.5) | ok; 2ª passada do gpt-6-astra em andamento |
+| 2026-10-17 | ARQUITETURA.md v3 aplicando os 18 achados | 3 | orquestrador (Opus 5.5) | ok |
+| 2026-10-17 | T01 2ª passada (v3) | 4 | gpt-6-astra (Codex) | ok: críticos resolvidos; 8 importantes + 3 sugestões novos (reproduziu bug de NOT NULL no SQLite) |
+| 2026-10-17 | ARQUITETURA.md v3.1 aplicando I1–I8, S1–S3; PLANO com T13b | 3 | orquestrador (Opus 5.5) | ok |
 | 2026-10-17 | T02 Esqueleto | 1 | worker-haiku | em andamento |

@@ -15,7 +15,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 ## Em andamento
 
 - Plano **aprovado** pelo Davi ("vai fazendo", 2026-10-17).
-- T01: v3 da arquitetura escrita com os 18 achados do gpt-6-astra; 2ª passada do astra rodando (brief `.orchestrator/briefs/002-…`, não vai pro git; se a sessão cair, rodar de novo pedindo pra conferir o §16).
+- T01: arquitetura **v3.1** (achados das duas passadas do gpt-6-astra aplicados, ver §16 e §16.1). Considero T01 concluída: nenhum crítico aberto, importantes todos endereçados no texto. A conferência final do desenho fica na revisão de nível 4 (T16).
 - T02: esqueleto com worker-haiku.
 - T03: spike com gpt-6.1-sol (brief `.orchestrator/briefs/003-spike.md`).
 - T15: interface da Vercel com worker-sonnet (modo demo).
