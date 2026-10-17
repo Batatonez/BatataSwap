@@ -1,0 +1,143 @@
+"""Núcleo síncrono de init e autenticação; executar fora do event loop."""
+
+import sqlite3
+import time
+from dataclasses import dataclass, field
+
+from batataswap.crypto import CryptoError, aad_owner_totp, new_token, token_hash
+from batataswap.db import write_transaction
+
+from .passwords import hash_password, verify_password
+from .totp import verify
+
+INVALID = "senha ou código inválido"
+DEVICE_LIFETIME = 180 * 24 * 3600
+
+
+@dataclass(frozen=True)
+class LoginResult:
+    status: str
+    message: str = ""
+    retry_after: int = 0
+    device_token: str | None = field(default=None, repr=False)
+
+    @property
+    def ok(self):
+        return self.status == "ok"
+
+
+def create_owner(conn, keyring, password, totp_secret):
+    """Prepara o dono; a CLI deve confirmar o TOTP antes de concluir init."""
+    if conn.execute("SELECT 1 FROM owner WHERE id=1").fetchone():
+        raise ValueError("Dono já cadastrado.")
+    if not isinstance(totp_secret, bytes) or len(totp_secret) != 20:
+        raise ValueError("Segredo TOTP inválido.")
+    password_hash = hash_password(password)
+    secret_ct = keyring.seal("totp", totp_secret, aad_owner_totp())
+    try:
+        with write_transaction(conn):
+            conn.execute(
+                "INSERT INTO owner(id,password_hash,totp_secret_ct,totp_last_step,updated_at) "
+                "VALUES (1,?,?,0,?)",
+                (password_hash, secret_ct, int(time.time())),
+            )
+    except sqlite3.IntegrityError:
+        raise ValueError("Dono já cadastrado.") from None
+
+
+def _budget_key(conn, device_token, now):
+    if isinstance(device_token, str) and 1 <= len(device_token) <= 256:
+        try:
+            digest = token_hash(device_token)
+        except UnicodeError:
+            return "global"
+        if conn.execute(
+            "SELECT 1 FROM known_devices WHERE token_hash=? AND expires_at>? "
+            "AND revoked_at IS NULL",
+            (digest, now),
+        ).fetchone():
+            return "device:" + digest.hex()
+    return "global"
+
+
+def _finish(conn, keyring, budget, key, row, code, now, remember_device=False):
+    step = None
+    if row:
+        try:
+            secret = keyring.open("totp", row[1], aad_owner_totp())
+            step = verify(secret, code, now, row[2])
+        except CryptoError:
+            pass
+    device = None
+    if step is not None:
+        with write_transaction(conn):
+            consumed = (
+                conn.execute(
+                    "UPDATE owner SET totp_last_step=? WHERE id=1 AND totp_last_step < ?",
+                    (step, step),
+                ).rowcount
+                == 1
+            )
+            if consumed and remember_device:
+                device = new_token("dev_")
+                conn.execute(
+                    "INSERT INTO known_devices(token_hash,created_at,expires_at) VALUES (?,?,?)",
+                    (token_hash(device), int(now), int(now) + DEVICE_LIFETIME),
+                )
+        if consumed:
+            budget.success(key)
+            return LoginResult("ok", device_token=device)
+    budget.fail(key)
+    return LoginResult("invalido", INVALID)
+
+
+def check_login(
+    conn,
+    keyring,
+    budget,
+    slot,
+    password,
+    code,
+    device_token=None,
+    now=None,
+    *,
+    remember_device=False,
+) -> LoginResult:
+    now = time.time() if now is None else now
+    key = _budget_key(conn, device_token, now)
+    remaining = budget.check(key)
+    if remaining:
+        return LoginResult("trancado", "trancado", remaining)
+    if not slot.acquire():
+        return LoginResult("ocupado", "Tente novamente em instantes.")
+    try:
+        # Reconfere após a fila: tentativas anteriores podem ter trancado o orçamento.
+        remaining = budget.check(key)
+        if remaining:
+            return LoginResult("trancado", "trancado", remaining)
+        row = conn.execute(
+            "SELECT password_hash,totp_secret_ct,totp_last_step FROM owner WHERE id=1"
+        ).fetchone()
+        valid = bool(row) and verify_password(password, row[0])
+        if not valid:
+            budget.fail(key)
+            return LoginResult("invalido", INVALID)
+        return _finish(conn, keyring, budget, key, row, code, now, remember_device)
+    finally:
+        slot.release()
+
+
+def verify_totp_only(conn, keyring, budget, code, device_token=None, now=None) -> LoginResult:
+    now = time.time() if now is None else now
+    key = _budget_key(conn, device_token, now)
+    remaining = budget.check(key)
+    if remaining:
+        return LoginResult("trancado", "trancado", remaining)
+    row = conn.execute(
+        "SELECT password_hash,totp_secret_ct,totp_last_step FROM owner WHERE id=1"
+    ).fetchone()
+    return _finish(conn, keyring, budget, key, row, code, now)
+
+
+def unlock(budget):
+    budget.reset()

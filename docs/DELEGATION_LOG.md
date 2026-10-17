@@ -34,3 +34,4 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-17 | T05 Cripto | 3 | worker-opus | ok (66 testes) |
 | 2026-10-17 | Revisão T05 | 3 | gpt-6.1-sol (Codex) | aprovar com correções: 0 crítico, 1 importante (FIFO trava abertura da chave), 4 sugestões |
 | 2026-10-17 | Correções T05 | 3 | worker-opus | ok (78 testes) |
+| 2026-10-17 | T06 Senha, TOTP, rate limit, dono | 3 | gpt-6.1-sol (Codex) | ok de primeira (vetores RFC 6238, TOTP atômico); revisão do worker-opus em andamento |
