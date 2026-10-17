@@ -21,6 +21,7 @@ sudo tailscale funnel reset
 tailscale funnel status
 ```
 
+`tailscale funnel reset` também apaga a configuração Serve existente.
 O Funnel deve continuar desligado durante a instalação. Anote o `DNSName` do nó
 `batatarp` sem o ponto final. Instale o Git se necessário:
 
@@ -31,18 +32,18 @@ git clone https://github.com/Batatonez/BatataSwap ~/BatataSwap
 cd ~/BatataSwap
 ```
 
-## 2. Instalar a branch revisada
+## 2. Instalar o SHA revisado
 
-Informe a branch que o orquestrador liberou. O script instala em `/opt/batataswap`,
+Informe o SHA de 40 hex revisado e registrado em `docs/STATUS.md`. O script instala em `/opt/batataswap`,
 com dono root, cria usuário/pastas e copia as units. Pode ser repetido; não sobrescreve
 config existente, não gera chave/senha e não habilita serviço ou timers.
 
 ```bash
-read -r -p 'Branch revisada: ' BRANCH
-sudo bash deploy/instalar.sh "$BRANCH"
+read -r -p 'SHA revisado (40 hex): ' SHA
+sudo bash deploy/instalar.sh "$SHA"
 ```
 
-Não execute o instalador sobre uma instância em uso para atualizar: use o passo 12.
+Não execute o instalador sobre uma instância em uso para atualizar: use o passo 11.
 
 ## 3. Editar a configuração
 
@@ -64,30 +65,30 @@ sudo chmod 0640 /etc/batataswap/batataswap.toml
 
 ## 4. Inicializar presencialmente
 
-Execute diretamente como root em terminal privado, sem gravação de sessão:
+Em terminal privado, sem gravação, gere a credencial como root e depois inicialize
+pelo wrapper, nesta ordem:
 
 ```bash
-sudo env BATATASWAP_CONFIG=/etc/batataswap/batataswap.toml /opt/batataswap/.venv/bin/python -m batataswap init
+sudo /opt/batataswap/.venv/bin/python -m batataswap key-init
+sudo batataswap-admin init
 ```
 
-Fluxo esperado da T12: gerar 32 bytes aleatórios de chave mestra, cifrar usando
-`systemd-creds encrypt --name=batataswap-master` para
-`/etc/credstore.encrypted/batataswap-master`, preparar o banco com dono `batataswap`
-e pasta 0700, pedir e confirmar a senha (guardada apenas como scrypt), mostrar o QR
-e pedir um código do autenticador para confirmar o cadastro TOTP. Não fotografe o QR
-nem cole a chave/senha em conversa. O comando precisa suportar terminal interativo;
-não use o wrapper para esse primeiro init, pois ainda não existe a credencial.
-Se o fluxo implementado divergir, pare e ajuste a T12 antes de prosseguir.
+`key-init` gera 32 bytes e os envia pelo stdin para
+`systemd-creds encrypt --name=batataswap-master - /etc/credstore.encrypted/batataswap-master`.
+Recusa credencial existente sem `--substituir` e não toca no banco. Não substitua uma
+chave em uso. `init` cria o banco, pede senha, mostra QR e confirma o TOTP.
+Não fotografe o QR nem cole segredos em conversa.
 
-Confira a entrega da credencial sem imprimir seu conteúdo:
+Antes de iniciar qualquer serviço, confira a entrega sem imprimir conteúdo:
 
 ```bash
-sudo systemd-run --quiet --wait --pipe --collect --uid=batataswap --gid=batataswap -p LoadCredentialEncrypted=batataswap-master:/etc/credstore.encrypted/batataswap-master /bin/sh -c 'stat -c "%U:%G %a" "$CREDENTIALS_DIRECTORY/batataswap-master"'
+sudo systemd-run --quiet --wait --pipe --collect --expand-environment=no --uid=batataswap --gid=batataswap -p LoadCredentialEncrypted=batataswap-master:/etc/credstore.encrypted/batataswap-master /bin/sh -c 'stat -c "%U %a" "$CREDENTIALS_DIRECTORY/batataswap-master"'
 ```
 
-O resultado esperado é `batataswap:batataswap 400`, sem ACL adicional; a cripto recusa
-0400 incompatível ou permissões ampliadas. Confira com `getfacl` dentro de uma unit
-transitória equivalente se houver ACL configurada no host.
+Portão obrigatório: esperado `batataswap 400` (0400) ou `root 440` (0440,
+root:root com ACL em systemd ≥ 256). Qualquer outro resultado → pare; confira dono,
+grupo e ACL na unit transitória e corrija a entrega antes de prosseguir. A exceção
+root:root só vale quando o caminho da cripto vem de `$CREDENTIALS_DIRECTORY`.
 
 ## 5. Guardar a chave de recuperação
 
@@ -130,13 +131,27 @@ sudo batataswap-admin restore-test
 sudo journalctl -u batataswap-backup -u batataswap-restore-test --no-pager --lines=20
 ```
 
-Puxe as cópias para outro computador pela tailnet. Por exemplo, no outro computador,
-com acesso sudo autorizado e destino privado (não habilite sudo amplo só para isso):
+Opcional: copie backups para outro computador pela tailnet. No servidor, escolha
+um par real (substitua `copia` pelo nome) e prepare cópias privadas com sudo interativo:
 
 ```bash
-mkdir -p ~/Backups/batataswap
-chmod 0700 ~/Backups/batataswap
-rsync -av --rsync-path='sudo rsync' batatonez@batatarp:/var/backups/batataswap/ ~/Backups/batataswap/
+install -d -m 0700 ~/batataswap-transferencia
+sudo install -o "$(id -un)" -g "$(id -gn)" -m 0600 /var/backups/batataswap/copia.db /var/backups/batataswap/copia.json ~/batataswap-transferencia/
+```
+
+No outro computador:
+
+```bash
+install -d -m 0700 ~/Backups/batataswap
+scp batatonez@batatarp:batataswap-transferencia/copia.db batatonez@batatarp:batataswap-transferencia/copia.json ~/Backups/batataswap/
+chmod 0600 ~/Backups/batataswap/copia.*
+```
+
+Toda semana, confira falhas dos jobs; backup e restore-test acionam uma unit que
+escreve no journal com prioridade crit:
+
+```bash
+sudo journalctl -p crit -u 'batataswap*' --since '1 week ago'
 ```
 
 ## T13b — ensaio com banco descartável
@@ -148,7 +163,7 @@ com os mesmos caminhos, nunca o banco de produção. Não mantenha outra aplica�
 mesmo hostname. Use senha e TOTP de teste e execute os passos 1–6 nessa instância.
 
 - [ ] T13 passa; banco novo sem memórias, chave/senha/TOTP exclusivos de teste.
-- [ ] Abra temporariamente: `sudo tailscale funnel --bg 8780`.
+- [ ] Abra temporariamente: `sudo tailscale funnel --bg http://127.0.0.1:8780`.
 - [ ] Nas duas contas, adicione `https://<DNSName>/mcp` em Personalizar → Conectores.
 - [ ] Faça senha + TOTP, consentimento com `conta-1` / `conta-2` e troca de código.
 - [ ] Confira `tools/call` com dados fictícios e continuidade entre as contas.
@@ -158,11 +173,28 @@ mesmo hostname. Use senha e TOTP de teste e execute os passos 1–6 nessa instâ
   ou comandos com argumento visível. Use o cliente do ensaio T13.
 - [ ] Feche: `sudo tailscale funnel reset`; remova conectores de teste das duas contas.
 - [ ] Pare serviço e timers com os comandos de emergência abaixo.
-- [ ] Execute `sudo batataswap-admin wipe --incluir-backups` e confirme a destruição
-  somente na instância descartável. Isso não substitui apagar a chave/TOTP de teste.
-- [ ] Descarte integralmente a instância/volume de teste, incluindo banco, credencial,
-  backups, senha e cadastro TOTP. Não reaproveite seus segredos na produção.
-- [ ] Restaure a configuração revisada, sem TTL curto, e registre evidências sem segredos.
+- [ ] Descarte os segredos de teste com os comandos abaixo, somente na instância de ensaio.
+- [ ] Apague a entrada TOTP de teste no aplicativo autenticador e remova os conectores.
+- [ ] Restaure a configuração revisada e registre evidências sem segredos.
+
+Depois do ensaio, com serviço e manutenção parados:
+
+```bash
+sudo systemctl stop batataswap-backup.timer batataswap-restore-test.timer batataswap-cleanup.timer
+sudo systemctl stop batataswap.service batataswap-backup.service batataswap-restore-test.service batataswap-cleanup.service
+sudo batataswap-admin wipe --incluir-backups
+sudo rm /etc/credstore.encrypted/batataswap-master
+sudo rm -rf /var/lib/batataswap
+sudo find /var/backups/batataswap -mindepth 1 -delete
+```
+
+Para produção, após apagar o TOTP de teste, crie tudo do zero e repita o portão `stat`
+do passo 4 antes de iniciar:
+
+```bash
+sudo /opt/batataswap/.venv/bin/python -m batataswap key-init
+sudo batataswap-admin init
+```
 
 ## 7. Publicar depois da T16
 
@@ -170,7 +202,7 @@ Só prossiga quando T16 não tiver nenhum achado crítico ou importante aberto e
 T13b estiver concluído. Na instalação definitiva, confirme chave/senha/TOTP novos.
 
 ```bash
-sudo tailscale funnel --bg 8780
+sudo tailscale funnel --bg http://127.0.0.1:8780
 tailscale funnel status
 ```
 
@@ -183,7 +215,9 @@ aparece também no Claude Code web. Confira web, app e celular na T17.
 ## 8. Restaurar uma cópia
 
 Agende a interrupção. Pare também os timers e aguarde serviços de manutenção em curso
-antes de restaurar, para evitar concorrência. Escolha o caminho completo da cópia;
+antes de restaurar, para evitar concorrência. O wrapper recusa restore/wipe enquanto qualquer `batataswap.service`,
+`batataswap-*.service` ou `batataswap-*.timer` estiver active/activating.
+Escolha o caminho completo da cópia dentro de `/var/backups/batataswap`;
 o manifesto `.json` correspondente deve estar junto e legível pelo usuário batataswap.
 
 ```bash
@@ -196,7 +230,8 @@ sudo systemctl start batataswap.service
 sudo systemctl start batataswap-backup.timer batataswap-restore-test.timer batataswap-cleanup.timer
 ```
 
-A CLI deve conferir manifesto/integridade, guardar banco atual com WAL e SHM em
+Restore aceita banco atual inexistente (host novo). A CLI deve conferir
+manifesto/integridade e, se existir, guardar banco atual com WAL e SHM em
 `antes-do-restore-<data>`, trocar o banco e remover WAL/SHM antigos. Deve invalidar
 grants, tokens, transações, códigos, sessões, aparelhos e confirmações pendentes,
 incrementar `restore_epoch` e ajustar `totp_last_step` ao máximo com o horário atual.
@@ -215,7 +250,30 @@ A CLI lê do stdin: digite/cole no terminal privado, sem colocar a chave em argu
 variáveis do shell ou histórico. Ela valida checksum e recria a credencial cifrada
 com `systemd-creds encrypt` no host novo. Copie o par `.db`/`.json` para
 `/var/backups/batataswap`, dono `batataswap:batataswap`, modo 0600.
-Execute o passo 8 e depois habilite serviço e timers (passo 6).
+No host novo, prepare a pasta de entrada:
+
+```bash
+install -d -m 0700 ~/batataswap-transferencia
+```
+
+No computador que guarda as cópias, envie o par ao host novo (substitua `HOST-NOVO`
+e `copia` pelos valores reais):
+
+```bash
+scp ~/Backups/batataswap/copia.db ~/Backups/batataswap/copia.json batatonez@HOST-NOVO:batataswap-transferencia/
+```
+
+No host novo, execute:
+
+```bash
+sudo install -o batataswap -g batataswap -m 0600 ~/batataswap-transferencia/copia.db ~/batataswap-transferencia/copia.json /var/backups/batataswap/
+sudo batataswap-admin restore /var/backups/batataswap/copia.db
+sudo batataswap-admin restore-test
+```
+
+A sequência é `key-import` como root, depois `restore` pelo wrapper; não execute init.
+Se o DNS mudar, ajuste `public_origin` no TOML e refaça os conectores nas duas contas.
+Depois habilite serviço e timers (passo 6).
 Revalide a URL pública e configure o nó dedicado antes de publicar (passo 7).
 
 ## 10. Emergência: desligar tudo
@@ -242,7 +300,7 @@ Somente após T16 e a publicação do passo 7. Acompanhe com o orquestrador:
 - [ ] Headers `Forwarded`, `X-Forwarded-*`, `X-Real-IP` forjados são ignorados;
   não alteram origem/Host nem o rate limit (use testes T13 sem expor credenciais).
 - [ ] Login errado aciona limite/trancamento; `unlock` administrativo permite recuperação.
-- [ ] Credencial entregue ao usuário do serviço com modo 0400 e sem ACL extra.
+- [ ] Credencial aprovada no portão obrigatório do passo 4 (0400 ou root:root 0440).
 - [ ] Reboot: `sudo reboot`; depois conferir serviço, timers e Funnel.
 - [ ] Queda: `sudo systemctl kill --signal=SIGKILL batataswap.service`; aguardar
   reinício e conferir `systemctl status batataswap.service` e `/saude` pela URL pública.
@@ -252,16 +310,24 @@ Somente após T16 e a publicação do passo 7. Acompanhe com o orquestrador:
   em ambiente isolado; decifrar tudo via `restore-test`, sem trocar o nó de produção.
 - [ ] Conferir retenção e logs sem conteúdo/segredos, e registrar evidências sanitizadas.
 
-## 12. Atualizar
+## 11. Atualizar
 
-Confira a revisão da branch e tenha uma cópia válida antes da atualização:
+Confira o SHA revisado de 40 hex registrado em `docs/STATUS.md` e tenha backup válido:
 
 ```bash
 sudo batataswap-admin backup
-sudo bash /opt/batataswap/deploy/atualizar.sh
+read -r -p 'SHA revisado (40 hex): ' SHA
+sudo bash /opt/batataswap/deploy/atualizar.sh "$SHA"
 ```
 
-O script faz pull fast-forward da branch atual, instala lock com hashes e pacote sem
-dependências, atualiza units/admin e executa daemon-reload. Reinicia apenas se o serviço
-estiver ativo e mostra status curto. Se falhar, pare e consulte o journal; não force
-reset do Git nem restaure banco antigo sem o procedimento do passo 8.
+O script para serviço e manutenção, faz fetch, checkout detached do SHA e confere HEAD.
+Recria o venv vazio (preserva o antigo para diagnóstico), instala ambos os locks com
+hashes e instala o pacote sem rede, dependências ou isolamento de build. Atualiza
+units/admin, executa `migrate` pelo wrapper antes de iniciar e retoma serviço/timers
+se o serviço estava ativo. Se falhar, mantenha tudo parado e consulte o journal.
+
+Exportação privada para arquivo:
+
+```bash
+(umask 077; sudo batataswap-admin export --out - > ~/memoria.json)
+```

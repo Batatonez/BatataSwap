@@ -106,8 +106,10 @@ def load_master_key(credentials_dir: Path | None = None) -> bytes:
     ``LoadCredentialEncrypted=``). Recusa link simbólico, arquivo que não seja regular (FIFO,
     diretório…), tamanho diferente de 32 bytes e, no POSIX, arquivo acessível por grupo ou outros
     ou com dono diferente do usuário atual ou do root. O systemd entrega a credencial com modo
-    0400 e dono do serviço, o que passa.
+    0400 e dono do serviço; também aceita root:root sem bits de outros quando o caminho
+    vem da variável do systemd (0440 com ACL nas versões recentes).
     """
+    from_environment = credentials_dir is None
     if credentials_dir is None:
         env = os.environ.get("CREDENTIALS_DIRECTORY")
         if not env:
@@ -139,7 +141,7 @@ def load_master_key(credentials_dir: Path | None = None) -> bytes:
         raise CryptoError(f"não foi possível ler a chave mestra: {path}") from None
 
     try:
-        _check_key_file(os.fstat(fd), path)
+        _check_key_file(os.fstat(fd), path, from_environment=from_environment)
         data = b""
         while len(data) <= MASTER_KEY_SIZE:
             chunk = os.read(fd, MASTER_KEY_SIZE + 1 - len(data))
@@ -156,14 +158,17 @@ def load_master_key(credentials_dir: Path | None = None) -> bytes:
     return data
 
 
-def _check_key_file(st: os.stat_result, path: Path) -> None:
+def _check_key_file(st: os.stat_result, path: Path, *, from_environment: bool = False) -> None:
     """Confere, pelo descritor já aberto, tipo, tamanho e (no POSIX) dono e permissões."""
     if not stat.S_ISREG(st.st_mode):
         raise CryptoError(f"a chave mestra precisa ser um arquivo comum: {path}")
     if st.st_size != MASTER_KEY_SIZE:
         raise CryptoError(f"a chave mestra precisa ter exatamente {MASTER_KEY_SIZE} bytes: {path}")
     if os.name == "posix":
-        if st.st_mode & 0o077:
+        systemd_root = (
+            from_environment and st.st_uid == 0 and st.st_gid == 0 and not st.st_mode & 0o007
+        )
+        if st.st_mode & 0o077 and not systemd_root:
             raise CryptoError(
                 f"a chave mestra não pode ser acessível por grupo ou outros (use 0400): {path}"
             )

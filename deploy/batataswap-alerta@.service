@@ -1,0 +1,25 @@
+[Unit]
+Description=Alerta de falha BatataSwap (%i)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/echo Falha de manutenção BatataSwap: %i; confira o journal.
+StandardOutput=journal
+SyslogLevel=crit
+SyslogIdentifier=batataswap-alerta
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallErrorNumber=EPERM
+RemoveIPC=yes
+UMask=0077

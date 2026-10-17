@@ -2,6 +2,7 @@ import base64
 import hashlib
 import os
 import re
+import stat
 import threading
 
 import pytest
@@ -520,3 +521,36 @@ def test_import_rejeita_base32_nao_canonico():
     assert base64.b32decode(tweaked[:52] + "====") == MASTER  # mesmos bytes, mesmo checksum
     with pytest.raises(CryptoError, match="formato"):
         import_key(tweaked)
+
+
+@posix_only
+@pytest.mark.parametrize(
+    "from_environment,uid,gid,mode,allowed",
+    [
+        (True, 0, 0, 0o440, True),
+        (True, 0, 0, 0o640, True),
+        (False, 0, 0, 0o440, False),
+        (True, 0, 123, 0o440, False),
+        (True, 123, 0, 0o440, False),
+        (True, 0, 0, 0o444, False),
+    ],
+)
+def test_systemd_root_credential(tmp_path, monkeypatch, from_environment, uid, gid, mode, allowed):
+    _write_key(tmp_path, MASTER)
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    real_fstat = os.fstat
+
+    def fake_fstat(fd):
+        values = list(real_fstat(fd))
+        values[0] = stat.S_IFREG | mode
+        values[4] = uid
+        values[5] = gid
+        return os.stat_result(values)
+
+    monkeypatch.setattr(crypto.os, "fstat", fake_fstat)
+    args = () if from_environment else (tmp_path,)
+    if allowed:
+        assert load_master_key(*args) == MASTER
+    else:
+        with pytest.raises(CryptoError):
+            load_master_key(*args)

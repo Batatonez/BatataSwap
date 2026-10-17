@@ -5,19 +5,44 @@ if (( EUID != 0 )); then
     exit 1
 fi
 case "${1:-}" in
-    serve|init|key-export|backup|restore-test|export|grants|revoke|unlock|cleanup) ;;
+    key-init|key-import)
+        echo "rode como root diretamente: sudo /opt/batataswap/.venv/bin/python -m batataswap $1" >&2
+        exit 2 ;;
+    serve|init|migrate|key-export|backup|restore-test|export|grants|revoke|unlock|cleanup) ;;
     restore|wipe)
-        state=$(systemctl is-active batataswap.service || true)
-        case "$state" in
-            inactive|failed) ;;
-            *) echo 'Pare batataswap.service antes de restore ou wipe.' >&2; exit 1 ;;
-        esac
+        # list-units inclui units transitórias carregadas e timers ativando.
+        units=$(systemctl list-units --all --no-legend --plain \
+            --state=active,activating batataswap.service 'batataswap-*.service' 'batataswap-*.timer')
+        if [[ -n "$units" ]]; then
+            echo 'Pare o serviço, todos os serviços de manutenção e timers antes de restore ou wipe.' >&2
+            exit 1
+        fi
+        if [[ "$1" == restore ]]; then
+            if [[ $# != 2 || ! -f "$2" || -L "$2" ]]; then
+                echo 'Uso: restore <arquivo em /var/backups/batataswap>.' >&2; exit 2
+            fi
+            backup_path=$(realpath -e -- "$2")
+            if [[ "$backup_path" != /var/backups/batataswap/* ]]; then
+                echo 'Restore aceita somente arquivos em /var/backups/batataswap.' >&2; exit 2
+            fi
+            set -- restore "$backup_path"
+        fi
         ;;
-    *) echo 'Subcomando inválido. key-import deve ser executado diretamente como root.' >&2; exit 2 ;;
+    *) echo 'Subcomando inválido.' >&2; exit 2 ;;
 esac
-exec systemd-run --quiet --wait --pipe --collect --uid=batataswap --gid=batataswap \
+terminal=(--pipe)
+case "$1" in
+    init|wipe|key-export) terminal=(--pty -E TERM) ;;
+esac
+exec systemd-run --quiet --wait "${terminal[@]}" --collect --expand-environment=no \
+    --uid=batataswap --gid=batataswap \
     -p LoadCredentialEncrypted=batataswap-master:/etc/credstore.encrypted/batataswap-master \
     -p Environment=BATATASWAP_CONFIG=/etc/batataswap/batataswap.toml \
     -p StateDirectory=batataswap -p StateDirectoryMode=0700 -p UMask=0077 \
+    -p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes -p NoNewPrivileges=yes \
+    -p PrivateDevices=yes -p ProtectKernelTunables=yes -p ProtectKernelModules=yes \
+    -p ProtectControlGroups=yes -p RestrictNamespaces=yes -p LockPersonality=yes \
+    -p WorkingDirectory=/var/lib/batataswap \
+    -p SystemCallErrorNumber=EPERM -p ProtectKernelLogs=yes -p RemoveIPC=yes \
     -p ReadWritePaths=/var/backups/batataswap \
     /opt/batataswap/.venv/bin/python -m batataswap "$@"
