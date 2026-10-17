@@ -22,7 +22,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - T04: **pronta** (revisada, correções aplicadas).
 - T06: commitada; correções da revisão (unlock via `meta.unlock_requested_at`, reserva atômica no Budget, init confirma TOTP antes do INSERT, decaimento da penalidade, lista de senhas 12+) em andamento com gpt-6.1-sol (brief `.orchestrator/briefs/010-…`; se cair, refazer a partir da revisão registrada no DELEGATION_LOG).
 - T09 (núcleo da memória) com worker-sonnet, sem commit ainda. Se a sessão cair, refazer.
-- T03 em andamento com o Davi: spike no ar no Funnel (`batatarp…ts.net`, 443). Host chega sem porta. Falta: Davi adicionar conector `…/aberto/mcp` na conta 1 e testar `ping`; depois `/protegido/mcp` pra pegar o client_id do CIMD. **Lembrar de desligar o Funnel e parar o spike no fim** (`sudo tailscale funnel --https=443 off`; `pkill -f spike/servidor.py`).
+- T03 em andamento com o Davi: spike no ar no Funnel (`batatarp…ts.net`, 443). **Transporte validado** (conta 1 web + Claude Code web: `ping` ok; protocolo 2026-07-28, sem Origin, Host sem porta — ARQUITETURA §1.0). Falta: conector `/protegido/mcp` pra pegar o client_id do CIMD; testar no app do celular e na conta 2. **Lembrar de desligar o Funnel e parar o spike no fim** (`sudo tailscale funnel --https=443 off`; `pkill -f spike/servidor.py`).
 - T05: **pronta** (revisada, correções aplicadas). Conferir na T14/T17 que o systemd entrega a credencial com dono do serviço e modo 0400 (o crypto recusa 0440/ACL).
 
 ## Decisões do Davi (2026-10-17)

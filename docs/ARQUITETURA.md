@@ -42,6 +42,20 @@ no repositório oficial (`modelcontextprotocol/modelcontextprotocol`, pastas `20
 | Planos | Conector personalizado por URL: Free (1), **Pro**, Max, Team, Enterprise. Em **Personalizar → Conectores** | Cada conta adiciona o mesmo URL e faz o próprio login |
 | Recursos que o Claude não usa | Assinatura de recursos, sampling, elicitação, recursos de rascunho | Não usamos |
 
+### 1.0 Medido no spike (T03, 2026-10-17, claude.ai web + Claude Code web)
+
+| Item | Valor real |
+|---|---|
+| Versão do protocolo | `MCP-Protocol-Version: 2026-07-28` (stateless): primeira chamada é `server/discover`, sem `initialize`, sem `Mcp-Session-Id` |
+| Chamadas vistas | `server/discover`, `tools/list`, `prompts/list`, `resources/list`, `tools/call` (o servidor responde listas vazias de prompts/resources) |
+| `Origin` | ausente |
+| `Host` | `batatarp.<tailnet>.ts.net` (sem porta) |
+| `Accept` | `application/json, text/event-stream` |
+| `User-Agent` | `Claude-User` (só telemetria; nunca decide nada) |
+| Claude Code web | conector adicionado no claude.ai aparece automaticamente na sessão do Claude Code web e funciona |
+
+Consequências: `allowed_mcp_origins` fica vazio (Origin presente em `/mcp` → 403); a borda aceita Host exato sem porta; o servidor fala 2026-07-28 (e 2025-11-25 por compatibilidade, que o SDK já cobre).
+
 ### 1.1 O Tailscale Funnel atende?
 
 **Sim.** O Funnel publica `https://<nó>.<tailnet>.ts.net` com certificado válido, e o TLS termina **no servidor** (o relay do Tailscale não vê o conteúdo). Restrições: só as portas 443, 8443 e 10000; a banda tem um limite que não dá pra configurar (irrelevante pra texto); e o nome aparece nos logs públicos de certificado (Certificate Transparency). **A URL não é segredo.**
