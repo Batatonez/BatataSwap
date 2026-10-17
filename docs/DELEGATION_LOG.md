@@ -28,3 +28,5 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-17 | T15 Interface Vercel (modo demo) | 2 | worker-sonnet | ok; 1 ajuste de ruff |
 | 2026-10-17 | Revisão cruzada T03 + T15 | 3 | gpt-6.1-sol (Codex) | aprovar com correções: 0 críticos, 2 importantes (CSP com curinga; spike sem prazo de leitura), 3 sugestões |
 | 2026-10-17 | Correções da revisão (web / spike) | 2 | worker-sonnet / gpt-6.1-sol | ok; teste comportamental de JS (sugestão 3) fica pendente |
+| 2026-10-17 | T04 Config, banco, migrador, esquema 0001 | 3 | gpt-6.1-sol (Codex) | ok de primeira (testes e lint); revisão cruzada do worker-opus em andamento |
+| 2026-10-17 | T05 Cripto | 3 | worker-opus | em andamento |
