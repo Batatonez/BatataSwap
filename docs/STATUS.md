@@ -31,6 +31,11 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 1. Aplicar as correções da revisão T01 no `ARQUITETURA.md`.
 2. Com o plano aprovado: T02 (esqueleto, worker-haiku), depois T03 (spike).
 
+## Servidor do Davi
+
+- Hostname `batatarp`, usuário `batatonez`. Ubuntu 24.04.4 LTS, systemd 255 (tem `systemd-creds`), Python 3.12.3.
+- Tailscale **não instalado** (2026-10-17). Passo 1 enviado: instalar e `tailscale up`.
+
 ## Pendências
 
-- Versão do Ubuntu do Davi (comando pedido: `lsb_release -ds; systemctl --version | head -1; python3 --version; tailscale version | head -1`).
+- Aprovação do plano pelo Davi.

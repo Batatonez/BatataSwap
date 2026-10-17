@@ -585,5 +585,4 @@ Tomadas pelo Davi em 2026-10-17:
 4. Claude Code local (loopback) desligado.
 5. Sync de mensagens entre contas entra na v1 (§7.1).
 
-Em aberto:
-- Versão do Ubuntu (decide systemd-creds ou arquivo 0400, e de onde vem o Python 3.11+).
+6. Servidor: Ubuntu 24.04.4, systemd 255 → chave por `systemd-creds` (`LoadCredentialEncrypted=`); Python 3.12 do sistema. O caminho do arquivo 0400 fica só como reserva.
