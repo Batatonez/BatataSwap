@@ -20,7 +20,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - T01: arquitetura **v3.1** (achados das duas passadas do gpt-6-astra aplicados, ver §16 e §16.1). Considero T01 concluída: nenhum crítico aberto, importantes todos endereçados no texto. A conferência final do desenho fica na revisão de nível 4 (T16).
 - T03: código pronto e revisado (`spike/`); Davi instalando no servidor.
 - T04: commitado; revisão do worker-opus em andamento (se a sessão cair, refazer a revisão).
-- T05: cripto com worker-opus (sem commit ainda; se a sessão cair, refazer).
+- T05: commitado; revisão do gpt-6.1-sol em andamento (se a sessão cair, refazer a revisão). Pendência: checar permissão 0400 da chave em POSIX.
 
 ## Decisões do Davi (2026-10-17)
 
