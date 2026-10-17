@@ -14,8 +14,9 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 
 ## Em andamento
 
-- T01: revisão da `ARQUITETURA.md` v2 pelo gpt-6-astra (brief em `.orchestrator/briefs/001-revisao-arquitetura.md`, que não vai pro git). Se a sessão cair, rodar de novo.
-- Plano (`docs/PLANO.md`) apresentado ao Davi. **Esperando aprovação antes de construir.**
+- Plano **aprovado** pelo Davi ("vai fazendo", 2026-10-17).
+- T01: v3 da arquitetura escrita com os 18 achados do gpt-6-astra; 2ª passada do astra rodando (brief `.orchestrator/briefs/002-…`, não vai pro git; se a sessão cair, rodar de novo pedindo pra conferir o §16).
+- T02: esqueleto com worker-haiku.
 
 ## Decisões do Davi (2026-10-17)
 
@@ -23,6 +24,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - "Logar com a conta do Claude" = o Claude se conecta ao BatataSwap pelo conector (OAuth). Não existe "Entrar com Claude" pra terceiros e usar o OAuth da assinatura fora do Claude viola os termos.
 - GitHub fora do login (o Claude web já tem conector do GitHub). Login: senha scrypt + TOTP obrigatório, página no servidor.
 - Spike com Funnel liberado ("faz o que precisar"), servidor descartável sem dado.
+- Orquestrador (pós-revisão): hostname próprio pro BatataSwap via 2ª instância do tailscaled (nó `batataswap`, plano A); 8443 no `batatarp` é plano B. `apagar` do MCP só manda pra lixeira.
 - Claude Code local (loopback) desligado: o Davi só usa web/app.
 - **Novo requisito:** sync de mensagens entre contas (`anexar_mensagens` / `ler_conversa`, ARQUITETURA §7.1). Limitação explicada ao Davi: o Claude reescreve as mensagens na chamada; não é cópia fiel.
 
