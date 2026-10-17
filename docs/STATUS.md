@@ -7,13 +7,15 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 
 ## Pronto
 
+- Codex logado; luna, sol e astra respondem.
+- `docs/ARQUITETURA.md` v2 e `docs/PLANO.md` (T01–T18).
 - CLAUDE.md / AGENTS.md / workers (`.claude/agents/`) com as regras de orquestrador.
 - `docs/ARQUITETURA.md` v1 (pesquisa da doc oficial feita: Streamable HTTP + OAuth com PKCE e CIMD; Funnel atende na porta 8443).
 
 ## Em andamento
 
-- Login do Codex (`codex login --device-auth`) esperando o Davi aprovar. Numa sessão nova, refazer.
-- `docs/PLANO.md` (tarefas T01…) ainda não escrito.
+- T01: revisão da `ARQUITETURA.md` v2 pelo gpt-6-astra (brief em `.orchestrator/briefs/001-revisao-arquitetura.md`, que não vai pro git). Se a sessão cair, rodar de novo.
+- Plano (`docs/PLANO.md`) apresentado ao Davi. **Esperando aprovação antes de construir.**
 
 ## Decisões do Davi (2026-10-17)
 
@@ -22,13 +24,12 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - GitHub fora do login (o Claude web já tem conector do GitHub). Login: senha scrypt + TOTP obrigatório, página no servidor.
 - Spike com Funnel liberado ("faz o que precisar"), servidor descartável sem dado.
 - Claude Code local (loopback) desligado: o Davi só usa web/app.
-- **Novo requisito:** sync de mensagens entre contas. Ferramentas `anexar_mensagens(conversa, mensagens)` e `ler_conversa(conversa)`, formato `Claude 1: … / Usuário: … / Claude 2: …`. Limitação explicada ao Davi: o Claude reescreve as mensagens na chamada; não é cópia fiel. Falta pôr na ARQUITETURA.md.
+- **Novo requisito:** sync de mensagens entre contas (`anexar_mensagens` / `ler_conversa`, ARQUITETURA §7.1). Limitação explicada ao Davi: o Claude reescreve as mensagens na chamada; não é cópia fiel.
 
 ## Próximo passo
 
-1. Testar luna/sol/astra no Codex.
-2. Atualizar ARQUITETURA.md (sync de mensagens, painel Vercel com login PKCE, GitHub fora) e escrever `docs/PLANO.md`.
-3. Apresentar o plano e esperar aprovação do Davi.
+1. Aplicar as correções da revisão T01 no `ARQUITETURA.md`.
+2. Com o plano aprovado: T02 (esqueleto, worker-haiku), depois T03 (spike).
 
 ## Pendências
 
