@@ -19,7 +19,6 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - Plano **aprovado** pelo Davi ("vai fazendo", 2026-10-17).
 - T01: arquitetura **v3.1** (achados das duas passadas do gpt-6-astra aplicados, ver §16 e §16.1). Considero T01 concluída: nenhum crítico aberto, importantes todos endereçados no texto. A conferência final do desenho fica na revisão de nível 4 (T16).
 - T03: código pronto e revisado (`spike/`); falta rodar no servidor com o Davi.
-- T03 na prática depende do Davi: Tailscale instalado no `batatarp` e a 2ª instância (plano A).
 
 ## Decisões do Davi (2026-10-17)
 
@@ -27,7 +26,8 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - "Logar com a conta do Claude" = o Claude se conecta ao BatataSwap pelo conector (OAuth). Não existe "Entrar com Claude" pra terceiros e usar o OAuth da assinatura fora do Claude viola os termos.
 - GitHub fora do login (o Claude web já tem conector do GitHub). Login: senha scrypt + TOTP obrigatório, página no servidor.
 - Spike com Funnel liberado ("faz o que precisar"), servidor descartável sem dado.
-- Orquestrador (pós-revisão): hostname próprio pro BatataSwap via 2ª instância do tailscaled (nó `batataswap`, plano A); 8443 no `batatarp` é plano B. `apagar` do MCP só manda pra lixeira.
+- **BatataLink fora do projeto** (Davi, 2026-10-17): nada de copiar código, nada de dividir hostname. ARQUITETURA v3.2.
+- Orquestrador (pós-revisão): `apagar` do MCP só manda pra lixeira.
 - Claude Code local (loopback) desligado: o Davi só usa web/app.
 - **Novo requisito:** sync de mensagens entre contas (`anexar_mensagens` / `ler_conversa`, ARQUITETURA §7.1). Limitação explicada ao Davi: o Claude reescreve as mensagens na chamada; não é cópia fiel.
 
@@ -39,12 +39,13 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 ## Servidor do Davi
 
 - Hostname `batatarp`, usuário `batatonez`. Ubuntu 24.04.4 LTS, systemd 255 (tem `systemd-creds`), Python 3.12.3.
-- Tailscale **não instalado** (2026-10-17). Passo 1 enviado: instalar e `tailscale up`.
+- Tailscale 1.104.1 instalado e logado (2026-10-17). Nó `batatarp`, MagicDNS `batatarp.<tailnet>.ts.net` (o Davi tem o nome do tailnet; `tailscale status --json | grep DNSName`). Funnel ainda **desligado**.
+- O BatataSwap usa esse nó na porta 443, sozinho no hostname (ARQUITETURA §1.1).
 
 ## Pendências
 
 - Teste comportamental do JS do painel (PKCE, callback, expiração, demo sem rede) — sugestão da revisão; fazer junto com a T11.
 
-- **BLOQUEIO (pergunta pro Davi):** o repo BatataSwap é **público** e o BatataLink é **privado**. Copiar código do BatataLink (db, secretbox, totp, ratelimit, middleware) pra cá publicaria esse código. Opções: (a) deixar o BatataSwap privado (Vercel Hobby funciona com repo privado; o servidor clona com deploy key só leitura); (b) aceitar publicar esses módulos; (c) reescrever sem copiar. T04–T07 esperando a resposta. T03 (spike) e T15 (Vercel) seguem, porque não copiam nada.
+- ~~Repo público × código do BatataLink~~ resolvido: o Davi tirou o BatataLink do projeto. Código todo próprio; repo segue público.
 
 - Aprovação do plano pelo Davi.

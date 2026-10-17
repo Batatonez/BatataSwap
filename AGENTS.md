@@ -49,9 +49,9 @@ BatataSwap/
 │   ├── __main__.py        # python -m batataswap (serve | init | export | wipe | ...)
 │   ├── app.py             # monta Starlette: borda, OAuth, /mcp, painel
 │   ├── config.py          # /etc/batataswap/batataswap.toml
-│   ├── edge.py            # middleware que nega por padrão (vindo do BatataLink)
-│   ├── db.py, migrations/ # SQLite STRICT + migrador (vindo do BatataLink)
-│   ├── crypto.py          # AES-256-GCM com AAD (vindo do BatataLink: secretbox)
+│   ├── edge.py            # middleware que nega por padrão
+│   ├── db.py, migrations/ # SQLite STRICT + migrador
+│   ├── crypto.py          # AES-256-GCM com AAD, HKDF, HMAC
 │   ├── auth/              # senha scrypt, TOTP, rate limit, login, OAuth (AS + RS)
 │   ├── memory.py          # regras de negócio: versões, limites, busca, apagar
 │   ├── tools.py           # ferramentas MCP
@@ -64,11 +64,9 @@ BatataSwap/
 
 Se a estrutura mudar, atualize esta seção.
 
-## Código vindo do BatataLink
+## Código próprio
 
-Arquivos copiados de `batatonez/batatalink` (mesmo autor) levam no topo:
-`# Origem: batatonez/batatalink@<commit> src/batatalink/hub/<arquivo>.py (mesmo autor), adaptado.`
-e entram na lista do `NOTICE.md`. Mudança de comportamento em código copiado precisa estar no resumo do worker.
+Não copie código de outros repositórios do Davi (o BatataLink está fora deste projeto). Use biblioteca padrão e as dependências do `pyproject.toml`; o repositório é público.
 
 ## Segurança (inegociável)
 
@@ -93,4 +91,4 @@ python3 -m venv .venv
 .venv/bin/ruff check src tests && .venv/bin/ruff format --check src tests
 ```
 
-Esses comandos passam a valer depois da T01. Se mudarem, atualize esta seção.
+Esses comandos valem desde a T02. Se mudarem, atualize esta seção.
