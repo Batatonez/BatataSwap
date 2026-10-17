@@ -13,7 +13,7 @@ O conteúdo das memórias nunca passa por aqui.
 
 `vercel.json` já traz `cleanUrls`, o rewrite de `/callback` e os headers de segurança (CSP, HSTS e outros).
 
-**Trocar o `connect-src`:** na CSP do `vercel.json` ele está como `'self' https://*.ts.net`. Quando a origem exata do servidor for conhecida, troque `https://*.ts.net` por ela (ex.: `https://servidor.tailnet.ts.net`).
+**Origem da API em dois lugares:** o mesmo valor (ex.: `https://servidor.tailnet.ts.net`, sem barra no fim) vai em `config.js` (`API_ORIGIN`) e na CSP do `vercel.json`, no lugar do marcador `https://API_ORIGIN_AQUI` do `connect-src`. Sem curinga: a CSP só libera o servidor exato. Enquanto o marcador estiver lá, o login real e o status não funcionam (o modo demo funciona).
 
 ## Como o token passa do callback para o painel
 

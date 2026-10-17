@@ -5,6 +5,7 @@
 let accessToken = null; // só em memória
 let expireTimer = null;
 let revokeTarget = null;
+let session = 0; // muda a cada login/saída/expiração; descarta respostas atrasadas
 
 const $ = (id) => document.getElementById(id);
 
@@ -15,6 +16,7 @@ function showMsg(text) {
 }
 
 function showLogin(message) {
+  session++;
   accessToken = null;
   clearTimeout(expireTimer);
   $("painel").hidden = true;
@@ -24,6 +26,7 @@ function showLogin(message) {
 }
 
 function setToken(token, expiresInSec) {
+  session++;
   accessToken = token;
   const ms = Math.min(Number(expiresInSec) || 900, 900) * 1000;
   clearTimeout(expireTimer);
@@ -59,10 +62,11 @@ async function handleCallback() {
   const tx = takeTransaction(); // já apaga do sessionStorage
   history.replaceState(null, "", "/painel"); // tira code/state/iss antes de trocar
 
-  if (err) return showLogin("O servidor recusou o login (" + err + ").");
   if (!tx) return showLogin("Login expirado ou não iniciado aqui. Entre de novo.");
-  if (!code || !state || state !== tx.state) return showLogin("Resposta de login inválida (state).");
+  if (!state || state !== tx.state) return showLogin("Resposta de login inválida (state).");
   if (iss !== API_BASE) return showLogin("Resposta de login inválida (emissor).");
+  // Só depois de validar a resposta: o texto do erro recebido nunca é mostrado.
+  if (err || !code) return showLogin("O servidor recusou o login. Tente de novo.");
 
   const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -150,11 +154,13 @@ function renderLimits(l) {
 }
 
 async function load() {
+  const mine = session;
   try {
     const [con, ati] = await Promise.all([
       getJson("/api/painel/conexoes", DEMO.conexoes),
       getJson("/api/painel/atividade", DEMO.atividade),
     ]);
+    if (mine !== session) return; // saiu ou expirou enquanto carregava
     renderCards(con.conexoes || [], ati.por_conta || []);
     renderLimits(ati.limites || {});
     $("login").hidden = true;
@@ -162,6 +168,7 @@ async function load() {
     $("sair").hidden = false;
     showMsg("");
   } catch (e) {
+    if (mine !== session) return;
     if (e instanceof Expired) showLogin("Sessão expirada. Entre de novo.");
     else showLogin("Não consegui carregar os dados do servidor.");
   }

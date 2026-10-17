@@ -68,3 +68,9 @@ def test_vercel_json():
     assert "script-src 'self'" in csp
     assert "frame-ancestors 'none'" in csp
     assert headers["Referrer-Policy"] == "no-referrer"
+
+
+def test_csp_sem_curinga():
+    cfg = json.loads((WEB / "vercel.json").read_text(encoding="utf-8"))
+    headers = {h["key"]: h["value"] for r in cfg["headers"] for h in r["headers"]}
+    assert "*" not in headers["Content-Security-Policy"]
