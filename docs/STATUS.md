@@ -17,6 +17,8 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - Plano **aprovado** pelo Davi ("vai fazendo", 2026-10-17).
 - T01: v3 da arquitetura escrita com os 18 achados do gpt-6-astra; 2ª passada do astra rodando (brief `.orchestrator/briefs/002-…`, não vai pro git; se a sessão cair, rodar de novo pedindo pra conferir o §16).
 - T02: esqueleto com worker-haiku.
+- T03: spike com gpt-6.1-sol (brief `.orchestrator/briefs/003-spike.md`).
+- T15: interface da Vercel com worker-sonnet (modo demo).
 
 ## Decisões do Davi (2026-10-17)
 
@@ -39,5 +41,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - Tailscale **não instalado** (2026-10-17). Passo 1 enviado: instalar e `tailscale up`.
 
 ## Pendências
+
+- **BLOQUEIO (pergunta pro Davi):** o repo BatataSwap é **público** e o BatataLink é **privado**. Copiar código do BatataLink (db, secretbox, totp, ratelimit, middleware) pra cá publicaria esse código. Opções: (a) deixar o BatataSwap privado (Vercel Hobby funciona com repo privado; o servidor clona com deploy key só leitura); (b) aceitar publicar esses módulos; (c) reescrever sem copiar. T04–T07 esperando a resposta. T03 (spike) e T15 (Vercel) seguem, porque não copiam nada.
 
 - Aprovação do plano pelo Davi.
