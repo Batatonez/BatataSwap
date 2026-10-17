@@ -25,4 +25,6 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-17 | ARQUITETURA.md v3.1 aplicando I1–I8, S1–S3; PLANO com T13b | 3 | orquestrador (Opus 5.5) | ok |
 | 2026-10-17 | T02 Esqueleto (pyproject, CI, lock com hash, NOTICE) | 1 | worker-haiku | ok de primeira; revisado pelo orquestrador |
 | 2026-10-17 | T03 Spike (código) | 2 | gpt-6.1-sol (Codex) | ok de primeira: 16 testes; revisado pelo orquestrador; revisão cruzada com o T15 |
-| 2026-10-17 | T15 Interface Vercel (modo demo) | 2 | worker-sonnet | ok; ajuste de ruff pedido; revisão de segurança pelo gpt-6.1-sol em andamento |
+| 2026-10-17 | T15 Interface Vercel (modo demo) | 2 | worker-sonnet | ok; 1 ajuste de ruff |
+| 2026-10-17 | Revisão cruzada T03 + T15 | 3 | gpt-6.1-sol (Codex) | aprovar com correções: 0 críticos, 2 importantes (CSP com curinga; spike sem prazo de leitura), 3 sugestões |
+| 2026-10-17 | Correções da revisão (web / spike) | 2 | worker-sonnet / gpt-6.1-sol | ok; teste comportamental de JS (sugestão 3) fica pendente |

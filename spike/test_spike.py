@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime
 
@@ -146,9 +147,8 @@ async def test_no_credentials_in_log(client, capsys):
     assert record["origin"] == "https://origem.example"
 
 
-@pytest.mark.parametrize("path", ["/aberto/mcp", "/oauth/token", "/desconhecido"])
-async def test_body_limit(client, path):
-    assert (await client.post(path, content=b"x" * (65536 + 1))).status_code == 413
+async def test_body_limit(client):
+    assert (await client.post("/aberto/mcp", content=b"x" * (65536 + 1))).status_code == 413
     assert (await client.post("/oauth/token", content=b"x" * 65536)).status_code == 400
 
 
@@ -161,3 +161,56 @@ async def test_origin_required(monkeypatch):
     monkeypatch.delenv("SPIKE_PUBLIC_ORIGIN", raising=False)
     with pytest.raises(ValueError, match="SPIKE_PUBLIC_ORIGIN"):
         create_app()
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "status"),
+    [
+        ("POST", "/protegido/mcp", 401),
+        ("POST", "/oauth/token", 400),
+        ("POST", "/desconhecido", 404),
+        ("GET", "/.well-known/oauth-protected-resource/protegido/mcp", 200),
+        ("GET", "/.well-known/oauth-authorization-server", 200),
+        ("GET", "/oauth/authorize", 200),
+    ],
+)
+async def test_response_without_reading_body(monkeypatch, method, path, status):
+    monkeypatch.setenv("SPIKE_PUBLIC_ORIGIN", ORIGIN)
+    app = create_app()
+    messages = []
+
+    async def receive():
+        pytest.fail("A rota não deve consumir o corpo.")
+
+    async def send(message):
+        messages.append(message)
+
+    await app(
+        {"type": "http", "method": method, "path": path, "headers": [], "query_string": b""},
+        receive,
+        send,
+    )
+    assert messages[0]["status"] == status
+
+
+async def test_body_timeout(monkeypatch, capsys):
+    monkeypatch.setenv("SPIKE_PUBLIC_ORIGIN", ORIGIN)
+    monkeypatch.setenv("SPIKE_BODY_TIMEOUT", "0.05")
+    app = create_app()
+    messages = []
+
+    async def receive():
+        await asyncio.sleep(0.02)
+        return {"type": "http.request", "body": b"x", "more_body": True}
+
+    async def send(message):
+        messages.append(message)
+
+    await app(
+        {"type": "http", "method": "POST", "path": "/aberto/mcp", "headers": []},
+        receive,
+        send,
+    )
+    assert messages[0]["status"] == 408
+    record = json.loads(capsys.readouterr().out.removeprefix("SPIKE "))
+    assert record["status"] == 408

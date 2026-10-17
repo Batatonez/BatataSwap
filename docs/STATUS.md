@@ -7,6 +7,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 
 ## Pronto
 
+- T15: interface da Vercel em `web/` (modo demo; `API_ORIGIN_AQUI` em `config.js` e no CSP do `vercel.json` a trocar pela origem real). Revisada pelo gpt-6.1-sol, correções aplicadas.
 - T02: esqueleto (`pyproject.toml`, `python -m batataswap --version`, CI, `requirements.lock` com hash, `NOTICE.md`).
 - Codex logado; luna, sol e astra respondem.
 - `docs/ARQUITETURA.md` v2 e `docs/PLANO.md` (T01–T18).
@@ -17,7 +18,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 
 - Plano **aprovado** pelo Davi ("vai fazendo", 2026-10-17).
 - T01: arquitetura **v3.1** (achados das duas passadas do gpt-6-astra aplicados, ver §16 e §16.1). Considero T01 concluída: nenhum crítico aberto, importantes todos endereçados no texto. A conferência final do desenho fica na revisão de nível 4 (T16).
-- T03 e T15: código commitado (spike em `spike/`, interface em `web/`); revisão de segurança cruzada do gpt-6.1-sol em andamento (brief `.orchestrator/briefs/004-…`; se a sessão cair, rodar de novo).
+- T03: código pronto e revisado (`spike/`); falta rodar no servidor com o Davi.
 - T03 na prática depende do Davi: Tailscale instalado no `batatarp` e a 2ª instância (plano A).
 
 ## Decisões do Davi (2026-10-17)
@@ -41,6 +42,8 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - Tailscale **não instalado** (2026-10-17). Passo 1 enviado: instalar e `tailscale up`.
 
 ## Pendências
+
+- Teste comportamental do JS do painel (PKCE, callback, expiração, demo sem rede) — sugestão da revisão; fazer junto com a T11.
 
 - **BLOQUEIO (pergunta pro Davi):** o repo BatataSwap é **público** e o BatataLink é **privado**. Copiar código do BatataLink (db, secretbox, totp, ratelimit, middleware) pra cá publicaria esse código. Opções: (a) deixar o BatataSwap privado (Vercel Hobby funciona com repo privado; o servidor clona com deploy key só leitura); (b) aceitar publicar esses módulos; (c) reescrever sem copiar. T04–T07 esperando a resposta. T03 (spike) e T15 (Vercel) seguem, porque não copiam nada.
 

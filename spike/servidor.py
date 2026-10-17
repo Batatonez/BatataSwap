@@ -1,5 +1,6 @@
 """Spike descartável: observação de transporte, sem memória nem autorização real."""
 
+import asyncio
 import json
 import os
 from datetime import UTC, datetime
@@ -17,6 +18,7 @@ MAX_BODY = 64 * 1024
 
 
 def create_app():
+    body_timeout = float(os.environ.get("SPIKE_BODY_TIMEOUT", "10"))
     origin = os.environ.get("SPIKE_PUBLIC_ORIGIN", "")
     parsed = urlsplit(origin)
     if (
@@ -130,19 +132,41 @@ def create_app():
             await send(message)
 
         try:
+            if scope["path"] == "/protegido/mcp":
+                response = JSONResponse(
+                    {"erro": "Autorização necessária."},
+                    status_code=401,
+                    headers={
+                        "WWW-Authenticate": 'Bearer resource_metadata="'
+                        f'{origin}/.well-known/oauth-protected-resource/protegido/mcp"'
+                    },
+                )
+                await response(scope, receive, observed_send)
+                return
+            if scope["path"] != "/aberto/mcp":
+                await app(scope, receive, observed_send)
+                return
+
             body = bytearray()
-            while True:
-                message = await receive()
-                if message["type"] == "http.disconnect":
-                    return
-                body.extend(message.get("body", b""))
-                if len(body) > MAX_BODY:
-                    await JSONResponse({"erro": "Corpo acima de 64 KiB."}, 413)(
-                        scope, receive, observed_send
-                    )
-                    return
-                if not message.get("more_body", False):
-                    break
+            try:
+                async with asyncio.timeout(body_timeout):
+                    while True:
+                        message = await receive()
+                        if message["type"] == "http.disconnect":
+                            return
+                        body.extend(message.get("body", b""))
+                        if len(body) > MAX_BODY:
+                            await JSONResponse({"erro": "Corpo acima de 64 KiB."}, 413)(
+                                scope, receive, observed_send
+                            )
+                            return
+                        if not message.get("more_body", False):
+                            break
+            except TimeoutError:
+                await JSONResponse({"erro": "Prazo de leitura do corpo excedido."}, 408)(
+                    scope, receive, observed_send
+                )
+                return
             if scope["path"] == "/aberto/mcp" and scope["method"] == "POST":
                 try:
                     payload = json.loads(body)
@@ -164,18 +188,7 @@ def create_app():
                     return {"type": "http.request", "body": bytes(body), "more_body": False}
                 return await receive()
 
-            if scope["path"] == "/protegido/mcp":
-                response = JSONResponse(
-                    {"erro": "Autorização necessária."},
-                    status_code=401,
-                    headers={
-                        "WWW-Authenticate": 'Bearer resource_metadata="'
-                        f'{origin}/.well-known/oauth-protected-resource/protegido/mcp"'
-                    },
-                )
-                await response(scope, replay_receive, observed_send)
-            else:
-                await app(scope, replay_receive, observed_send)
+            await app(scope, replay_receive, observed_send)
         finally:
             record.setdefault("status", 499)
             print("SPIKE " + json.dumps(record, ensure_ascii=False), flush=True)
@@ -191,4 +204,7 @@ if __name__ == "__main__":
         port=int(os.environ.get("SPIKE_PORT", "8780")),
         access_log=False,
         proxy_headers=False,
+        limit_concurrency=20,
+        timeout_keep_alive=5,
+        h11_max_incomplete_event_size=16384,
     )
