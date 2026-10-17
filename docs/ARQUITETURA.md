@@ -53,6 +53,10 @@ no repositório oficial (`modelcontextprotocol/modelcontextprotocol`, pastas `20
 | `Accept` | `application/json, text/event-stream` |
 | `User-Agent` | `Claude-User` (só telemetria; nunca decide nada) |
 | Claude Code web | conector adicionado no claude.ai aparece automaticamente na sessão do Claude Code web e funciona |
+| `client_id` (CIMD) do Claude hospedado | `https://claude.ai/oauth/mcp-oauth-client-metadata` |
+| Authorize | `redirect_uri=https://claude.ai/api/mcp/auth_callback`, `scope=memoria offline_access`, `resource` = URL exata do MCP, `response_type=code`, `code_challenge_method=S256`, com `state` |
+| Descoberta OAuth | feita pelo backend (`User-Agent: python-httpx/…`, `MCP-Protocol-Version: 2025-11-25`, sem Origin): POST sem token → 401 → GET PRM pelo `resource_metadata` → GET AS metadata |
+| Navegador do login | abre no navegador do aparelho do Davi (no teste, Safari do iPhone): a página de login/consentimento precisa funcionar bem no celular |
 
 Consequências: `allowed_mcp_origins` fica vazio (Origin presente em `/mcp` → 403); a borda aceita Host exato sem porta; o servidor fala 2026-07-28 (e 2025-11-25 por compatibilidade, que o SDK já cobre).
 
@@ -145,7 +149,7 @@ O AS só emite o que está nesta tabela. Ela é aplicada no `authorize`, no `tok
 
 - O RS de `/mcp` só aceita token cujo grant tenha recurso `<api>/mcp` e scope `memoria`. O RS de `/api/painel` só aceita recurso `<api>/api/painel` e scope `painel`. Um token nunca vale nos dois.
 - `resource` ausente → `invalid_target` (o Claude sempre manda, então isso não quebra nada).
-- O `client_id` do CIMD hospedado do Claude é descoberto no spike (T03) e vai pro config. O do Claude Code (`https://claude.ai/oauth/claude-code-client-metadata`) **não** entra, porque o loopback está desligado.
+- O `client_id` do CIMD hospedado do Claude, medido no spike (T03): `https://claude.ai/oauth/mcp-oauth-client-metadata`. Vai como valor padrão de `allowed_cimd_client_ids` no config. O do Claude Code (`https://claude.ai/oauth/claude-code-client-metadata`) **não** entra, porque o loopback está desligado.
 
 ### 4.2 Transação de autorização (achado 3)
 
