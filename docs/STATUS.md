@@ -17,8 +17,8 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 
 - Plano **aprovado** pelo Davi ("vai fazendo", 2026-10-17).
 - T01: arquitetura **v3.1** (achados das duas passadas do gpt-6-astra aplicados, ver §16 e §16.1). Considero T01 concluída: nenhum crítico aberto, importantes todos endereçados no texto. A conferência final do desenho fica na revisão de nível 4 (T16).
-- T03: spike com gpt-6.1-sol (brief `.orchestrator/briefs/003-spike.md`).
-- T15: interface da Vercel com worker-sonnet (modo demo).
+- T03 e T15: código commitado (spike em `spike/`, interface em `web/`); revisão de segurança cruzada do gpt-6.1-sol em andamento (brief `.orchestrator/briefs/004-…`; se a sessão cair, rodar de novo).
+- T03 na prática depende do Davi: Tailscale instalado no `batatarp` e a 2ª instância (plano A).
 
 ## Decisões do Davi (2026-10-17)
 

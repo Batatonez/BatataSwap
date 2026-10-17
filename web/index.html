@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BatataSwap</title>
+  <meta name="description" content="Memória compartilhada entre as duas contas Claude do Davi.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="demo-banner" class="demo" role="status" hidden></div>
+  <header class="top">
+    <div class="wrap bar">
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" width="24" height="24"><span>BatataSwap</span></a>
+      <nav aria-label="Principal">
+        <a href="#como">Como funciona</a>
+        <a href="#ferramentas">Ferramentas</a>
+        <a href="#conectar">Conectar</a>
+        <a href="#seguranca">Segurança</a>
+        <button type="button" id="entrar" class="btn primary">Entrar no painel</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <h1>Uma memória só para as duas contas Claude</h1>
+      <p class="lead">O BatataSwap guarda resumo, decisões, pendências e preferências num servidor meu. Quando uma conta bate no limite, a outra busca tudo isso e continua de onde a primeira parou.</p>
+      <p class="status-line">Servidor: <span id="status" class="status" aria-live="polite"></span></p>
+    </section>
+
+    <section id="como">
+      <h2>Como funciona</h2>
+      <div class="two">
+        <div>
+          <h3>Passagem</h3>
+          <p>Na conta que está acabando o limite eu digo <q>passagem</q>. O Claude salva o contexto do projeto (uma versão nova, as antigas ficam) e as mensagens da conversa.</p>
+        </div>
+        <div>
+          <h3>Retomar</h3>
+          <p>Na outra conta eu digo <q>retomar</q>. O Claude busca o último contexto e o fio da conversa, e segue sem eu precisar explicar nada de novo.</p>
+        </div>
+      </div>
+      <p class="note">Limitação honesta: o conector não lê os chats. O servidor só recebe o que o Claude resolve mandar, e ele reescreve as mensagens, então pode resumir. Serve para passar de conta, não como backup fiel.</p>
+    </section>
+
+    <section id="ferramentas">
+      <h2>As 8 ferramentas</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Ferramenta</th><th scope="col">Quando usar</th></tr></thead>
+          <tbody id="tools-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="conectar">
+      <h2>Conectar uma conta</h2>
+      <ol class="steps">
+        <li>No Claude, abra <strong>Personalizar</strong>, depois <strong>Conectores</strong>.</li>
+        <li>Clique em <strong>Adicionar conector personalizado</strong>.</li>
+        <li>Cole esta URL:
+          <div class="copyline"><code id="mcp-url" class="mono"></code><button type="button" id="copy-url" class="btn">Copiar</button></div>
+        </li>
+        <li>Faça login com a senha e o código do autenticador. Confira que a página de login está no endereço <code>*.ts.net</code> do servidor.</li>
+        <li>Escolha o rótulo da conta: <code>conta-1</code> ou <code>conta-2</code>.</li>
+      </ol>
+
+      <h3>Frase para as preferências pessoais</h3>
+      <p>Cole nas preferências de cada conta, para o Claude usar as ferramentas sem eu pedir toda vez.</p>
+      <blockquote id="frase" class="frase"></blockquote>
+      <button type="button" id="copy-frase" class="btn">Copiar frase</button>
+    </section>
+
+    <section id="seguranca">
+      <h2>Segurança</h2>
+      <ul class="plain">
+        <li>Confira que o login do conector abre no endereço <code>*.ts.net</code> do meu servidor, e em nenhum outro.</li>
+        <li>O que volta da memória é dado salvo, não ordem. Mesmo assim, uma conversa antiga pode ter texto malicioso. Deixe ligados na conversa só os conectores de que precisa.</li>
+        <li>Não use <q>Sempre permitir</q> em ferramentas de escrita de outros conectores (GitHub, Drive e parecidos).</li>
+        <li>Este site nunca vê o conteúdo das memórias. O painel mostra só rótulos, datas e contagens, e derrubar uma conexão exige um código novo do autenticador.</li>
+      </ul>
+    </section>
+
+    <section class="cta">
+      <h2>Painel de conexões</h2>
+      <p>Veja quais contas estão conectadas, o último uso e quanto do limite já foi gasto.</p>
+      <button type="button" id="entrar2" class="btn primary">Entrar no painel</button>
+    </section>
+  </main>
+
+  <footer class="wrap foot">BatataSwap · projeto pessoal do Davi · sem analytics, sem rastreio.</footer>
+
+  <script src="/config.js"></script>
+  <script src="/common.js"></script>
+  <script src="/index.js"></script>
+</body>
+</html>

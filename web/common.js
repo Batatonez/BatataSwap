@@ -1,0 +1,192 @@
+// Funções compartilhadas entre a página pública e o painel.
+// Regra: nenhum dado vira HTML. Tudo é montado com createElement + textContent.
+"use strict";
+
+const IS_DEMO = API_ORIGIN === "" || new URLSearchParams(location.search).has("demo");
+const API_BASE = API_ORIGIN.replace(/\/+$/, "");
+const RESOURCE = API_BASE + "/api/painel";
+const TX_KEY = "batataswap_tx";
+const TX_TTL_MS = 10 * 60 * 1000;
+
+function el(tag, props, children) {
+  const node = document.createElement(tag);
+  if (props) {
+    for (const [k, v] of Object.entries(props)) {
+      if (k === "text") node.textContent = v;
+      else if (k === "class") node.className = v;
+      else node.setAttribute(k, v);
+    }
+  }
+  for (const c of children || []) node.append(c);
+  return node;
+}
+
+function clear(node) {
+  while (node.firstChild) node.removeChild(node.firstChild);
+}
+
+function showDemoBanner() {
+  if (!IS_DEMO) return;
+  const slot = document.getElementById("demo-banner");
+  if (!slot) return;
+  slot.textContent = "Demonstração — dados de mentira";
+  slot.hidden = false;
+}
+
+// ---------- datas ----------
+function formatAbs(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  return d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function formatRel(iso) {
+  if (!iso) return "nunca";
+  const d = new Date(iso);
+  if (isNaN(d)) return "nunca";
+  const s = Math.round((Date.now() - d.getTime()) / 1000);
+  if (s < 45) return "agora há pouco";
+  const m = Math.round(s / 60);
+  if (m < 60) return "há " + m + " min";
+  const h = Math.round(m / 60);
+  if (h < 24) return "há " + h + " h";
+  const dias = Math.round(h / 24);
+  if (dias < 30) return "há " + dias + (dias === 1 ? " dia" : " dias");
+  const meses = Math.round(dias / 30);
+  if (meses < 12) return "há " + meses + (meses === 1 ? " mês" : " meses");
+  const anos = Math.round(dias / 365);
+  return "há " + anos + (anos === 1 ? " ano" : " anos");
+}
+
+function timeEl(iso) {
+  const t = el("time", { text: formatRel(iso) });
+  if (iso) {
+    t.setAttribute("datetime", iso);
+    t.setAttribute("title", formatAbs(iso));
+  }
+  return t;
+}
+
+function formatBytes(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1).replace(".", ",") + " KiB";
+  return (n / 1024 / 1024).toFixed(1).replace(".", ",") + " MiB";
+}
+
+// ---------- dados de mentira ----------
+function agoIso(min) {
+  return new Date(Date.now() - min * 60000).toISOString();
+}
+
+const DEMO = {
+  conexoes: () => ({
+    conexoes: [
+      { rotulo: "conta-1", ativo: true, conectado_desde: agoIso(60 * 24 * 12), ultimo_uso: agoIso(5) },
+      { rotulo: "conta-2", ativo: true, conectado_desde: agoIso(60 * 24 * 9), ultimo_uso: agoIso(60 * 26) },
+    ],
+  }),
+  atividade: () => ({
+    por_conta: [
+      { rotulo: "conta-1", contextos: 12, mensagens: 340, preferencias: 3, ultima_escrita: agoIso(7) },
+      { rotulo: "conta-2", contextos: 5, mensagens: 120, preferencias: 1, ultima_escrita: agoIso(60 * 26) },
+    ],
+    limites: {
+      escritas_hoje: 14,
+      escritas_max: 300,
+      bytes_hoje: 52000,
+      bytes_max: 4194304,
+      total_bytes: 1200000,
+      total_max: 209715200,
+    },
+  }),
+};
+
+// ---------- status ----------
+async function fetchSaude() {
+  if (IS_DEMO) return { online: true, versao: "0.1.0" };
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 5000);
+  try {
+    const r = await fetch(API_BASE + "/saude", {
+      credentials: "omit",
+      cache: "no-store",
+      signal: ctl.signal,
+    });
+    if (!r.ok) return { online: false };
+    const j = await r.json();
+    if (j && j.ok === true) return { online: true, versao: String(j.versao || "") };
+    return { online: false };
+  } catch (e) {
+    return { online: false };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ---------- PKCE ----------
+function b64url(bytes) {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function randomB64url(n) {
+  const a = new Uint8Array(n);
+  crypto.getRandomValues(a);
+  return b64url(a);
+}
+
+async function startLogin() {
+  const verifier = randomB64url(32);
+  const state = randomB64url(16);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  const challenge = b64url(new Uint8Array(digest));
+  sessionStorage.setItem(
+    TX_KEY,
+    JSON.stringify({ state: state, code_verifier: verifier, criado_em: Date.now() }),
+  );
+  const q = new URLSearchParams({
+    response_type: "code",
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    scope: "painel",
+    resource: RESOURCE,
+    state: state,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+  });
+  location.assign(API_BASE + "/oauth/authorize?" + q.toString());
+}
+
+// Lê e apaga a transação. Devolve null se não existe, venceu ou está corrompida.
+function takeTransaction() {
+  let raw = null;
+  try {
+    raw = sessionStorage.getItem(TX_KEY);
+    sessionStorage.removeItem(TX_KEY);
+  } catch (e) {
+    return null;
+  }
+  if (!raw) return null;
+  try {
+    const tx = JSON.parse(raw);
+    if (typeof tx.state !== "string" || typeof tx.code_verifier !== "string") return null;
+    if (typeof tx.criado_em !== "number" || Date.now() - tx.criado_em > TX_TTL_MS) return null;
+    return tx;
+  } catch (e) {
+    return null;
+  }
+}
+
+function loginClick(btn) {
+  btn.addEventListener("click", () => {
+    if (IS_DEMO) {
+      location.assign("painel.html?demo=1");
+      return;
+    }
+    btn.disabled = true;
+    startLogin().catch(() => {
+      btn.disabled = false;
+    });
+  });
+}

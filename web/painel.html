@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Painel · BatataSwap</title>
+  <meta name="color-scheme" content="light dark">
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="demo-banner" class="demo" role="status" hidden></div>
+  <header class="top">
+    <div class="wrap bar">
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" width="24" height="24"><span>BatataSwap</span></a>
+      <nav aria-label="Painel">
+        <a href="/">Início</a>
+        <button type="button" id="sair" class="btn" hidden>Sair</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <h1>Contas conectadas</h1>
+    <p id="msg" class="msg" role="alert" hidden></p>
+
+    <section id="login" hidden>
+      <p>Para ver as conexões, entre com a senha e o código do autenticador. O login acontece no meu servidor, não aqui.</p>
+      <button type="button" id="entrar" class="btn primary">Entrar</button>
+    </section>
+
+    <section id="painel" hidden>
+      <div id="cartoes" class="cards"></div>
+      <h2>Limites</h2>
+      <div id="limites" class="limits"></div>
+    </section>
+  </main>
+
+  <dialog id="dlg" aria-labelledby="dlg-titulo">
+    <form id="dlg-form" novalidate>
+      <h2 id="dlg-titulo">Desconectar conta</h2>
+      <p id="dlg-texto"></p>
+      <label for="totp">Código do autenticador (6 dígitos)</label>
+      <input id="totp" class="mono" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}">
+      <p id="dlg-erro" class="msg" role="alert" hidden></p>
+      <div class="actions">
+        <button type="button" id="dlg-cancelar" class="btn">Cancelar</button>
+        <button type="submit" id="dlg-ok" class="btn danger">Desconectar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/config.js"></script>
+  <script src="/common.js"></script>
+  <script src="/painel.js"></script>
+</body>
+</html>

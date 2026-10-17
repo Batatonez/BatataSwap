@@ -24,3 +24,5 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-17 | T01 2ª passada (v3) | 4 | gpt-6-astra (Codex) | ok: críticos resolvidos; 8 importantes + 3 sugestões novos (reproduziu bug de NOT NULL no SQLite) |
 | 2026-10-17 | ARQUITETURA.md v3.1 aplicando I1–I8, S1–S3; PLANO com T13b | 3 | orquestrador (Opus 5.5) | ok |
 | 2026-10-17 | T02 Esqueleto (pyproject, CI, lock com hash, NOTICE) | 1 | worker-haiku | ok de primeira; revisado pelo orquestrador |
+| 2026-10-17 | T03 Spike (código) | 2 | gpt-6.1-sol (Codex) | ok de primeira: 16 testes; revisado pelo orquestrador; revisão cruzada com o T15 |
+| 2026-10-17 | T15 Interface Vercel (modo demo) | 2 | worker-sonnet | ok; ajuste de ruff pedido; revisão de segurança pelo gpt-6.1-sol em andamento |

@@ -1,0 +1,124 @@
+:root {
+  --bg: #fbfaf7;
+  --fg: #1f1d19;
+  --muted: #5e5a52;
+  --line: #d9d5ca;
+  --surface: #f2efe7;
+  --accent: #e0a526;
+  --accent-fg: #1f1d19;
+  --link: #7a5200;
+  --ok: #2f7a3b;
+  --bad: #a8321f;
+  --focus: #1f1d19;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161512;
+    --fg: #ece8de;
+    --muted: #a8a397;
+    --line: #3a372f;
+    --surface: #201e19;
+    --link: #e8b84a;
+    --ok: #5fc16f;
+    --bad: #ef7a66;
+    --focus: #ece8de;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.wrap { max-width: 52rem; margin: 0 auto; padding: 0 1rem; }
+a { color: var(--link); }
+h1 { font-size: 1.9rem; line-height: 1.2; margin: 2rem 0 .75rem; }
+h2 { font-size: 1.3rem; margin: 2.5rem 0 .75rem; }
+h3 { font-size: 1.05rem; margin: 1.25rem 0 .4rem; }
+p { margin: .5rem 0 1rem; }
+code, .mono { font-family: var(--mono); font-size: .92em; }
+code { background: var(--surface); border: 1px solid var(--line); border-radius: 3px; padding: 0 .3em; }
+.muted { color: var(--muted); }
+.lead { font-size: 1.1rem; max-width: 40rem; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+.demo {
+  background: var(--accent); color: var(--accent-fg);
+  text-align: center; padding: .4rem 1rem; font-weight: 600; font-size: .9rem;
+}
+.top { border-bottom: 1px solid var(--line); }
+.bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1rem; padding-top: .6rem; padding-bottom: .6rem; }
+.brand { display: flex; align-items: center; gap: .5rem; font-weight: 700; color: var(--fg); text-decoration: none; }
+nav { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem 1rem; font-size: .95rem; }
+nav a { color: var(--fg); }
+
+.btn {
+  font: inherit; font-size: .95rem; cursor: pointer;
+  background: transparent; color: var(--fg);
+  border: 1px solid var(--fg); border-radius: 4px; padding: .35rem .85rem;
+}
+.btn:hover { background: var(--surface); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+.btn.primary:hover { filter: brightness(.95); }
+.btn.danger { border-color: var(--bad); color: var(--bad); }
+.btn[disabled] { opacity: .55; cursor: default; }
+
+.status { display: inline-flex; align-items: center; gap: .45rem; }
+.dot { width: .65rem; height: .65rem; border-radius: 50%; display: inline-block; background: var(--muted); }
+.dot.ok { background: var(--ok); }
+.dot.bad { background: var(--bad); }
+
+.two { display: grid; gap: 1rem 2rem; grid-template-columns: 1fr 1fr; }
+.note { color: var(--muted); border-left: 3px solid var(--accent); padding-left: .75rem; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; }
+table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+th, td { text-align: left; vertical-align: top; padding: .55rem .75rem; border-bottom: 1px solid var(--line); }
+tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
+thead th { background: var(--surface); }
+tbody th { white-space: nowrap; font-weight: 400; }
+.steps { padding-left: 1.25rem; }
+.steps li { margin-bottom: .6rem; }
+.copyline { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-top: .4rem; }
+.copyline code { overflow-wrap: anywhere; padding: .3rem .5rem; }
+.frase { margin: .5rem 0 .75rem; padding: .75rem 1rem; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 4px; font-family: var(--mono); font-size: .9rem; overflow-wrap: anywhere; }
+.plain { padding-left: 1.1rem; }
+.plain li { margin-bottom: .5rem; }
+.cta { border-top: 1px solid var(--line); margin-top: 2.5rem; }
+.foot { color: var(--muted); font-size: .9rem; padding-top: 2rem; padding-bottom: 2rem; }
+
+.msg { border: 1px solid var(--bad); color: var(--bad); border-radius: 4px; padding: .5rem .75rem; }
+.cards { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+.card { border: 1px solid var(--line); border-radius: 4px; background: var(--surface); padding: .9rem 1rem; }
+.card header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.card h3 { margin: 0; font-size: 1.1rem; }
+.card footer { margin-top: .9rem; }
+.tag { font-size: .8rem; border: 1px solid currentColor; border-radius: 3px; padding: 0 .4rem; }
+.tag.on { color: var(--ok); }
+.tag.off { color: var(--bad); }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem 1rem; margin: .8rem 0 0; }
+.stat dt { font-size: .8rem; color: var(--muted); }
+.stat dd { margin: 0; }
+.limits { display: grid; gap: 1rem; }
+.limit-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .25rem 1rem; font-size: .95rem; }
+progress { width: 100%; height: .7rem; accent-color: var(--accent); }
+
+dialog { border: 1px solid var(--fg); border-radius: 4px; background: var(--bg); color: var(--fg); max-width: min(24rem, calc(100vw - 2rem)); padding: 1rem 1.25rem; }
+dialog::backdrop { background: rgba(0, 0, 0, .5); }
+dialog h2 { margin-top: 0; }
+dialog label { display: block; font-size: .9rem; margin-bottom: .25rem; }
+dialog input { width: 100%; font-size: 1.2rem; letter-spacing: .2em; padding: .4rem .5rem; background: var(--bg); color: var(--fg); border: 1px solid var(--fg); border-radius: 4px; }
+.actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
+
+@media (max-width: 560px) {
+  .two { grid-template-columns: 1fr; }
+  tbody th { white-space: normal; overflow-wrap: anywhere; }
+  h1 { font-size: 1.5rem; }
+}
+
+progress { appearance: none; -webkit-appearance: none; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); overflow: hidden; }
+progress::-webkit-progress-bar { background: var(--bg); }
+progress::-webkit-progress-value { background: var(--accent); }
+progress::-moz-progress-bar { background: var(--accent); }
