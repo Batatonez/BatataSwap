@@ -1,10 +1,12 @@
 """Borda HTTP (§8): cada regra com caso positivo e negativo, sobre um app de brinquedo."""
 
 import asyncio
+import contextlib
 import json
 from dataclasses import dataclass, field
 
 import pytest
+from starlette.routing import Mount, Route, WebSocketRoute
 
 from batataswap.config import Config
 from batataswap.edge import EVENTS, EdgeMiddleware, RoutePolicy, RouteRule
@@ -53,6 +55,14 @@ class Toy:
         self.calls += 1
         if self.mode == "boom":
             raise RuntimeError("segredo-que-nao-pode-vazar")
+        if self.mode == "early":
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+        if self.mode == "swallow":
+            with contextlib.suppress(Exception):  # handler que engole qualquer erro de leitura
+                await receive()
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"ok"})
+            return
         body = b""
         while True:
             message = await receive()
@@ -60,9 +70,12 @@ class Toy:
             self.body_seen = len(body)
             if not message.get("more_body"):
                 break
+        if self.mode == "early":
+            await send({"type": "http.response.body", "body": str(len(body)).encode()})
+            return
         if self.mode == "boom_late":
             await send({"type": "http.response.start", "status": 200, "headers": []})
-            raise RuntimeError("x")
+            raise RuntimeError("segredo-que-nao-pode-vazar")
         if self.mode == "html":
             await send(
                 {
@@ -132,7 +145,7 @@ def call(
         "raw_path": raw_path if raw_path is not None else path.encode(),
         "query_string": query,
         "root_path": "",
-        "headers": [(k.lower().encode(), v.encode("latin-1")) for k, v in hdrs],
+        "headers": [(k.encode(), v.encode("latin-1")) for k, v in hdrs],
         "client": ("203.0.113.9", 5555),
         "server": ("127.0.0.1", 8780),
         "state": {"bearer": "forjado"},
@@ -590,7 +603,7 @@ def test_streaming_sem_credencial_estoura_8k():
     chunk = b"x" * 3000
     r = call(edge, "POST", "/oauth/token", chunks=(chunk, chunk, chunk))
     assert r.status == 413
-    assert app.body_seen <= 8 * 1024
+    assert app.calls == 0  # o handler nem roda com corpo grande
     assert sum(1 for m in r.messages if m["type"] == "http.response.start") == 1
 
 
@@ -671,12 +684,64 @@ def test_excecao_vira_500_generico():
     assert ("erro_interno", 500) in events
 
 
-def test_excecao_depois_do_inicio_nao_vaza():
+def test_excecao_depois_do_inicio_aborta_sem_vazar():
     events = []
     edge, _ = make("boom_late", events=events)
-    r = call(edge, path="/saude")
-    assert r.status == 200
-    assert ("erro_interno", 500) in events
+    with pytest.raises(RuntimeError) as info:
+        call(edge, path="/saude")
+    assert str(info.value) == "erro interno"
+    assert info.value.__cause__ is None and info.value.__suppress_context__
+    assert "segredo" not in repr(info.value)
+    assert events == [("repassado", 200), ("erro_interno", 500)]
+
+
+@pytest.mark.parametrize("mode", ["early", "swallow"])
+def test_corpo_grande_nao_chega_no_handler(mode):
+    edge, app = make(mode)
+    chunk = b"x" * 3000
+    r = call(edge, "POST", "/oauth/token", chunks=(chunk, chunk, chunk))
+    assert r.status == 413 and app.calls == 0
+    assert r.json() == {"erro": "Corpo da requisição grande demais."}
+    starts = [m for m in r.messages if m["type"] == "http.response.start"]
+    assert len(starts) == 1
+
+
+def test_handler_que_responde_antes_de_ler_recebe_corpo_inteiro():
+    edge, _ = make("early")
+    r = call(edge, "POST", "/oauth/token", chunks=(b"x" * 3000, b"x" * 3000))
+    assert r.status == 200 and r.body == b"6000"
+
+
+def test_handler_que_captura_excecao_recebe_corpo_pequeno():
+    edge, _ = make("swallow")
+    r = call(edge, "POST", "/oauth/token", chunks=(b"x" * 100,))
+    assert r.status == 200 and r.body == b"ok"
+
+
+def test_desconexao_no_meio_do_corpo_nao_chama_app():
+    edge, app = make()
+    sent = []
+    inbox = [
+        {"type": "http.request", "body": b"x", "more_body": True},
+        {"type": "http.disconnect"},
+    ]
+
+    async def receive():
+        return inbox.pop(0)
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/oauth/token",
+        "raw_path": b"/oauth/token",
+        "query_string": b"",
+        "headers": [(b"host", HOST.encode())],
+    }
+    asyncio.run(edge(scope, receive, send))
+    assert sent == [] and app.calls == 0
 
 
 def test_app_que_nao_responde_vira_500():
@@ -741,3 +806,170 @@ def test_callback_que_falha_nao_derruba():
         Toy(), config=Config(public_origin=ORIGIN), routes=RoutePolicy.default(), on_event=bad
     )
     assert call(edge, path="/saude").status == 200
+
+
+# -- caixa dos headers ---------------------------------------------------------------------
+
+
+def test_headers_de_proxy_em_caixa_mista_somem():
+    edge, _ = make()
+    forged = [
+        ("X-FORWARDED-FOR", "1.1.1.1"),
+        ("x-Forwarded-Proto", "http"),
+        ("FORWARDED", "for=1.1.1.1"),
+        ("X-Real-Ip", "1.1.1.1"),
+        ("Cf-Connecting-Ip", "1.1.1.1"),
+        ("TRUE-CLIENT-IP", "1.1.1.1"),
+        ("X-Forwarded-For", "2.2.2.2"),
+        ("Accept", "x"),
+    ]
+    r = call(edge, headers=forged)
+    assert r.status == 200
+    assert r.json()["headers"] == ["accept", "host"]
+
+
+@pytest.mark.parametrize("extra", [("HOST", HOST), ("Host", HOST), ("hOsT", "mal.example")])
+def test_host_duplicado_em_caixa_mista_400(extra):
+    edge, app = make()
+    assert call(edge, headers=[extra]).status == 400 and app.calls == 0
+
+
+def test_host_em_caixa_mista_unico_passa():
+    edge, _ = make()
+    assert call(edge, host=None, headers=[("HOST", HOST)]).status == 200
+
+
+def test_authorization_duplicado_em_caixa_mista_401():
+    edge, app = make()
+    hdrs = [("Authorization", f"Bearer {TOKEN}"), ("AUTHORIZATION", f"Bearer {TOKEN}")]
+    r = call(edge, "POST", "/mcp", hdrs)
+    assert r.status == 401 and app.calls == 0
+    assert call(edge, "POST", "/mcp", [("AUTHORIZATION", f"Bearer {TOKEN}")]).status == 200
+
+
+def test_origin_e_content_length_em_caixa_mista():
+    edge, _ = make()
+    assert call(edge, "POST", "/oauth/login", [("ORIGIN", ORIGIN)]).status == 200
+    hdrs = [("Content-Length", "1"), ("CONTENT-LENGTH", "1")]
+    assert call(edge, "POST", "/oauth/token", hdrs).status == 400
+
+
+# -- política x roteador do Starlette ------------------------------------------------------
+
+
+async def _endpoint(request):
+    return None
+
+
+def _routes(*specs):
+    return [Route(path, _endpoint, methods=methods) for path, methods in specs]
+
+
+DEFAULT_ROUTES = (
+    ("/.well-known/oauth-protected-resource/mcp", ["GET"]),
+    ("/.well-known/oauth-protected-resource", ["GET"]),
+    ("/.well-known/oauth-protected-resource/api/painel", ["GET"]),
+    ("/.well-known/oauth-authorization-server", ["GET"]),
+    ("/oauth/authorize", ["GET"]),
+    ("/oauth/login", ["POST"]),
+    ("/oauth/consent", ["GET", "POST"]),
+    ("/oauth/token", ["POST"]),
+    ("/oauth/revoke", ["POST"]),
+    ("/mcp", ["POST"]),
+    ("/api/painel/conexoes", ["GET"]),
+    ("/api/painel/atividade", ["GET"]),
+    ("/api/painel/revogar", ["POST"]),
+    ("/painel/{pagina}", ["GET", "POST"]),
+    ("/saude", ["GET"]),
+)
+
+
+def test_check_against_tabela_padrao_bate():
+    RoutePolicy.default().check_against(_routes(*DEFAULT_ROUTES))
+
+
+def test_check_against_head_vem_com_get():
+    policy = RoutePolicy([RouteRule("GET", "/saude", "public")])
+    policy.check_against(_routes(("/saude", ["GET"])))  # o Starlette já inclui HEAD
+    policy.check_against(_routes(("/saude", ["GET", "HEAD"])))
+
+
+def test_check_against_rota_sem_regra():
+    with pytest.raises(ValueError, match="rota sem regra: GET /extra"):
+        RoutePolicy.default().check_against(_routes(*DEFAULT_ROUTES, ("/extra", ["GET"])))
+    with pytest.raises(ValueError, match="rota sem regra: DELETE /mcp"):
+        RoutePolicy.default().check_against(_routes(*DEFAULT_ROUTES, ("/mcp", ["DELETE"])))
+
+
+def test_check_against_regra_sem_rota():
+    routes = [r for r in DEFAULT_ROUTES if r[0] != "/oauth/revoke"]
+    with pytest.raises(ValueError, match="regra sem rota: POST /oauth/revoke"):
+        RoutePolicy.default().check_against(_routes(*routes))
+
+
+def test_check_against_barra_final():
+    policy = RoutePolicy([RouteRule("GET", "/saude", "public")])
+    with pytest.raises(ValueError) as info:
+        policy.check_against(_routes(("/saude/", ["GET"])))
+    assert "rota sem regra: GET /saude/" in str(info.value)
+    assert "regra sem rota: GET /saude" in str(info.value)
+
+
+def test_check_against_parametro_fora_da_regra():
+    policy = RoutePolicy([RouteRule("GET", "/oauth/token", "public")])
+    with pytest.raises(ValueError, match="rota sem regra"):
+        policy.check_against(_routes(("/oauth/{x}", ["GET"])))
+
+
+def test_check_against_sobreposicao():
+    shadowed = RoutePolicy(
+        [
+            RouteRule("GET", "/api/painel/*", "bearer:painel"),
+            RouteRule("GET", "/api/painel/x", "public"),
+        ]
+    )
+    with pytest.raises(ValueError, match="regra inalcançável: GET /api/painel/x"):
+        shadowed.check_against(_routes(("/api/painel/x", ["GET"])))
+    ok = RoutePolicy(
+        [
+            RouteRule("GET", "/api/painel/x", "public"),
+            RouteRule("GET", "/api/painel/*", "bearer:painel"),
+        ]
+    )
+    ok.check_against(_routes(("/api/painel/x", ["GET"]), ("/api/painel/{nome}", ["GET"])))
+
+
+def test_check_against_recusa_mount_e_websocket():
+    policy = RoutePolicy([RouteRule("POST", "/mcp", "bearer:mcp")])
+    with pytest.raises(ValueError, match="Mount"):
+        policy.check_against([*_routes(("/mcp", ["POST"])), Mount("/mcp", app=Toy())])
+    with pytest.raises(ValueError, match="WebSocketRoute"):
+        policy.check_against([*_routes(("/mcp", ["POST"])), WebSocketRoute("/ws", _endpoint)])
+
+
+def test_check_against_rota_asgi_sem_metodos():
+    policy = RoutePolicy([RouteRule("POST", "/mcp", "bearer:mcp")])
+    policy.check_against([Route("/mcp", Toy())])  # app ASGI: o Starlette aceita qualquer método
+    with pytest.raises(ValueError, match="rota sem regra: /outra"):
+        policy.check_against([Route("/mcp", Toy()), Route("/outra", Toy())])
+
+
+def test_integracao_com_starlette_de_verdade():
+    from starlette.applications import Starlette
+    from starlette.responses import PlainTextResponse
+
+    async def ok(request):
+        return PlainTextResponse("ok")
+
+    routes = [Route("/saude", ok), Route("/mcp", ok, methods=["POST"])]
+    policy = RoutePolicy(
+        [RouteRule("POST", "/mcp", "bearer:mcp"), RouteRule("GET", "/saude", "public")]
+    )
+    policy.check_against(routes)
+    edge = EdgeMiddleware(
+        Starlette(routes=routes), config=Config(public_origin=ORIGIN), routes=policy
+    )
+    assert call(edge, "HEAD", "/saude").status == 200
+    assert call(edge, "GET", "/saude/").status == 404  # a borda não deixa o redirect de barra
+    assert call(edge, "POST", "/mcp", [bearer()]).status == 200
+    assert call(edge, "GET", "/mcp", [bearer()]).status == 405

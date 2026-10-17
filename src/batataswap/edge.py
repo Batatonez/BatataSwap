@@ -27,6 +27,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlsplit
 
+from starlette.routing import Route
+
 from batataswap.config import Config
 
 CATEGORIES = frozenset({"public", "form", "bearer:mcp", "bearer:painel", "cookie"})
@@ -138,6 +140,52 @@ class RoutePolicy:
     def for_path(self, path: str) -> tuple[RouteRule, ...]:
         return tuple(r for r in self.rules if r.matches_path(path))
 
+    def check_against(self, routes: Iterable[object]) -> None:
+        """Confere a política contra as rotas do Starlette, na montagem do app.
+
+        Falha (``ValueError``) se uma rota do Starlette não tiver regra para algum método,
+        se uma regra não tiver rota que a atenda, se uma regra ficar inalcançável por causa de
+        uma anterior, ou se aparecer ``Mount``/websocket/outro tipo de rota (a borda não sabe
+        decidir por eles). ``HEAD`` vem junto com ``GET`` dos dois lados; ``OPTIONS`` é da borda.
+        """
+        problems: list[str] = []
+        served: list[tuple[str, object, frozenset[str] | None]] = []
+        for route in routes:
+            if not isinstance(route, Route):
+                problems.append(f"tipo de rota não suportado: {type(route).__name__}")
+                continue
+            sample = re.sub(r"\{[^}]*\}", "x", route.path)
+            methods = None if route.methods is None else frozenset(route.methods)
+            served.append((sample, route, methods))
+            if methods is None:
+                if not self.for_path(sample):
+                    problems.append(f"rota sem regra: {route.path}")
+                continue
+            for method in sorted(methods - {"HEAD", "OPTIONS"}):
+                if not any(r.matches_path(sample) and r.method == method for r in self.rules):
+                    problems.append(f"rota sem regra: {method} {route.path}")
+        for i, rule in enumerate(self.rules):
+            prefix = rule.path.endswith("/*")
+            probe = rule.path[:-1] + "x" if prefix else rule.path
+            if any(
+                r.method == rule.method
+                and r.matches_path(probe)
+                and (not prefix or r.path.endswith("/*"))
+                for r in self.rules[:i]
+            ):
+                problems.append(f"regra inalcançável: {rule.method} {rule.path}")
+            if not any(
+                (
+                    rule.matches_path(sample)
+                    or (probe == rule.path and route.path_regex.match(probe))
+                )
+                and (methods is None or rule.method in methods)
+                for sample, route, methods in served
+            ):
+                problems.append(f"regra sem rota: {rule.method} {rule.path}")
+        if problems:
+            raise ValueError("Política da borda diverge do roteador: " + "; ".join(problems))
+
     @classmethod
     def default(cls) -> "RoutePolicy":
         """Tabela de rotas do §3 da arquitetura."""
@@ -163,10 +211,6 @@ class RoutePolicy:
                 RouteRule("GET", "/saude", "public", cors=True),
             ]
         )
-
-
-class _BodyTooLarge(Exception):
-    """Corpo passou do teto no meio do streaming."""
 
 
 def _json(message: str) -> bytes:
@@ -437,27 +481,38 @@ class EdgeMiddleware:
         await self._forward(scope, receive, send, rule, limit, cors_origin)
 
     async def _forward(self, scope, receive, send, rule, limit, cors_origin):
+        # O corpo inteiro é lido e contado ANTES de chamar o app: com corpo grande demais o
+        # handler nem roda, então nenhum efeito dele acontece. Os tetos são pequenos (≤ 256 KiB).
+        chunks: list[bytes] = []
         received = 0
-        overflow = False
+        while True:
+            message = await receive()
+            if message.get("type") != "http.request":
+                return  # cliente desconectou no meio do corpo: não há a quem responder
+            body = message.get("body", b"")
+            received += len(body)
+            if received > limit:
+                return await self._send_error(
+                    send, 413, "corpo_grande", cors=rule.cors, cors_origin=cors_origin
+                )
+            chunks.append(body)
+            if not message.get("more_body", False):
+                break
+
+        replayed = False
         started = False
 
-        async def limited_receive():
-            nonlocal received, overflow
-            if overflow:
-                raise _BodyTooLarge
-            message = await receive()
-            if message.get("type") == "http.request":
-                received += len(message.get("body", b""))
-                if received > limit:
-                    overflow = True
-                    raise _BodyTooLarge
-            return message
+        async def replay_receive():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
+            return await receive()
 
         async def guarded_send(message):
             nonlocal started
-            kind = message.get("type")
-            if kind == "http.response.start":
-                if overflow or started:
+            if message.get("type") == "http.response.start":
+                if started:
                     return
                 started = True
                 status = message.get("status", 500)
@@ -476,21 +531,19 @@ class EdgeMiddleware:
             await send(message)
 
         try:
-            await self.app(scope, limited_receive, guarded_send)
+            await self.app(scope, replay_receive, guarded_send)
         except Exception:  # noqa: BLE001 (toda exceção do app vira 500 genérico, sem detalhe)
-            if not started and not overflow:
-                started = True
-                await self._send_error(
-                    send, 500, "erro_interno", cors=rule.cors, cors_origin=cors_origin
-                )
-            elif started:
-                # Resposta já começou: não dá pra trocar o status. Sem detalhe, sem stack.
+            if started:
                 self._emit("erro_interno", 500)
-        if overflow and not started:
+                # A resposta já começou: o status não muda mais. Relança uma exceção genérica,
+                # sem a original encadeada, para o servidor abortar a conexão.
+                raise RuntimeError("erro interno") from None
+            started = True
             await self._send_error(
-                send, 413, "corpo_grande", cors=rule.cors, cors_origin=cors_origin
+                send, 500, "erro_interno", cors=rule.cors, cors_origin=cors_origin
             )
-        elif not started:
+            return
+        if not started:
             await self._send_error(
                 send, 500, "erro_interno", cors=rule.cors, cors_origin=cors_origin
             )

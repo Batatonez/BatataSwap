@@ -22,7 +22,8 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - T04: **pronta** (revisada, correções aplicadas).
 - T06: **pronta** (revisada; correções aplicadas). Novas assinaturas: `create_owner(..., confirm_code, now)`, `unlock(conn, now)` (grava `meta.unlock_requested_at`).
 - T09: **pronta** (revisada; correções aplicadas). `retry_checkpoint` deve ser chamado pela faxina (T12).
-- T07: commitada (`edge.py`); revisão do gpt-6.1-sol em andamento. Pendências pra T08/T10/T14: uvicorn com `server_header=False`, `proxy_headers=False`, `forwarded_allow_ips=""`; borda é o middleware mais externo; RS recusa token antes de ler corpo; T18 confere sessão em POST /painel. Notas do worker pra T10: `now` é keyword-only; listas/busca recebem `actor`; `restore`/`purge` só sem grant (CLI/painel); `read_conversation` devolve `proximo_antes_de`; cada chamada de escrita conta 1 no limite diário e os bytes são o texto puro.
+- T07: **pronta** (revisada; correções aplicadas). Pra T10: borda é o middleware mais externo; chamar `RoutePolicy.default().check_against(app.routes)` na montagem; `/mcp` como `Route` (Mount é recusado); desligar `/docs` e `/openapi.json`; uvicorn com `server_header=False`, `proxy_headers=False`, `forwarded_allow_ips=""`.
+- T08 (OAuth) com worker-opus, sem commit ainda; revisão prevista com gpt-6-astra. Se cair, refazer.
 - T03: **concluída**. Medições em ARQUITETURA §1.0 (protocolo 2026-07-28 no MCP, 2025-11-25 na descoberta, sem Origin, client_id `https://claude.ai/oauth/mcp-oauth-client-metadata`). Funnel **desligado** e spike parado (conferido de fora em 2026-10-17); conectores de teste removidos. Falta só a pasta `spike/` ser apagada do repo (fazer junto com a T14).
 - T05: **pronta** (revisada, correções aplicadas). Conferir na T14/T17 que o systemd entrega a credencial com dono do serviço e modo 0400 (o crypto recusa 0440/ACL).
 
