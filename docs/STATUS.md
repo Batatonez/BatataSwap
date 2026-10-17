@@ -20,7 +20,8 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - T01: arquitetura **v3.1** (achados das duas passadas do gpt-6-astra aplicados, ver §16 e §16.1). Considero T01 concluída: nenhum crítico aberto, importantes todos endereçados no texto. A conferência final do desenho fica na revisão de nível 4 (T16).
 - T03: código pronto e revisado (`spike/`); Davi instalando no servidor.
 - T04: **pronta** (revisada, correções aplicadas).
-- T06 (senha/TOTP/rate limit) com gpt-6.1-sol e T09 (núcleo da memória) com worker-sonnet, em paralelo, sem commit ainda. Se a sessão cair, refazer.
+- T06: commitada; correções da revisão (unlock via `meta.unlock_requested_at`, reserva atômica no Budget, init confirma TOTP antes do INSERT, decaimento da penalidade, lista de senhas 12+) em andamento com gpt-6.1-sol (brief `.orchestrator/briefs/010-…`; se cair, refazer a partir da revisão registrada no DELEGATION_LOG).
+- T09 (núcleo da memória) com worker-sonnet, sem commit ainda. Se a sessão cair, refazer.
 - T03 em andamento com o Davi: spike no ar no Funnel (`batatarp…ts.net`, 443). Host chega sem porta. Falta: Davi adicionar conector `…/aberto/mcp` na conta 1 e testar `ping`; depois `/protegido/mcp` pra pegar o client_id do CIMD. **Lembrar de desligar o Funnel e parar o spike no fim** (`sudo tailscale funnel --https=443 off`; `pkill -f spike/servidor.py`).
 - T05: **pronta** (revisada, correções aplicadas). Conferir na T14/T17 que o systemd entrega a credencial com dono do serviço e modo 0400 (o crypto recusa 0440/ACL).
 
