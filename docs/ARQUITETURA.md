@@ -761,7 +761,7 @@ Decisão do Davi (2026-10-17): site + status + **painel só de status e conexõe
   - CSP `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src <api>; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
   - `Referrer-Policy: no-referrer`;
   - sem script de terceiro e sem analytics.
-- **Pior caso com a Vercel comprometida**: com o Davi logado, um JS malicioso vê rótulos e atividade, e pra derrubar uma conexão ainda precisaria de um TOTP. Nenhuma memória vaza, porque o token do painel não vale no `/mcp` (§4.1).
+- **Pior caso com a Vercel comprometida** (corrigido na T16): pelo token do painel nenhuma memória vaza (§4.1). MAS um JS malicioso ou link de phishing pode mostrar um login falso, capturar senha + TOTP em tempo real e concluir um authorize do cliente Claude a partir da conta Claude do atacante — acesso total à memória. Atenuantes: o rótulo tem que ser conta-1/conta-2 (a conexão do Davi cai, perceptível), as páginas reais avisam "a senha só se digita em https://batatarp.<tailnet>.ts.net". Por isso `vercel_origin` fica desligado até o Davi decidir; WebAuthn é a correção de longo prazo.
 - O painel de **memórias** (ver/editar/restaurar/expurgar) é a T18: opcional, servido pelo próprio servidor.
 
 ---

@@ -53,6 +53,8 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 
 ## Pendências
 
+- **Decisões do Davi pedidas pela T16:** (I10) recriar chave mestra, senha e TOTP depois do ensaio (a chave apareceu no chat) — recomendado; (I8) aceitar por escrito o risco residual de preferência envenenada por injeção; (I9) aceitar ou não ligar o painel da Vercel (`vercel_origin`) sabendo do risco de phishing.
+
 - **T16: gpt-6-astra deu 'não expor'** (6 importantes, ver DELEGATION_LOG). Funnel só para o ensaio T13b; desligar depois até as correções + 2ª passada. Correções aplicadas (710 testes). Falta: parte Claude da T16 (worker-opus) e 2ª passada do astra. Pendência: pior caso de escape com caracteres de controle no limite de resposta (fator 4 assume só `\\`).
 
 - T14: correções aplicadas (init em 2 etapas, lock de build com hash, wrapper com sandbox, deploy por SHA, alertas). Pra T16: `_check_key_file` no caso root/ACL aceita bit de escrita no grupo — endurecer pra aceitar só até 0440; `requirements-build.lock` gerado offline (conferir hashes contra o PyPI na T16). **Contrato da CLI pra T12**: serve, key-init [--substituir] (root direto), key-import (root direto), init (wrapper, pty), migrate, key-export (pty), backup, restore <arq em /var/backups>, restore-test, export --out - (stdout), wipe [--incluir-backups] (pty), grants, revoke <rótulo>, unlock, cleanup. Deploy instala por SHA, não por branch. T14 precisa de 2ª revisão depois da T12.
