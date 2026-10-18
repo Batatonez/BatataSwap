@@ -335,3 +335,26 @@ def test_revoke_requires_json_content_type(world):
         content=json.dumps({"rotulo": "conta-1", "totp": world.totp()}),
     )
     assert response.status_code == 400
+
+
+def test_trashed_records_do_not_count_in_last_write(world):
+    conn = world.env.conn
+
+    def last(label):
+        body = world.browser().get("/api/painel/atividade", headers=auth(world.painel)).json()
+        return {a["rotulo"]: a for a in body["por_conta"]}[label]
+
+    before = last("conta-1")["ultima_escrita"]
+    # Manda para a lixeira o contexto mais novo de conta-1: a última escrita volta no tempo.
+    conn.execute(
+        "UPDATE contexts SET trashed_at = 1, trash_root = 'x' WHERE source_label = 'conta-1' "
+        "AND version = 2"
+    )
+    after = last("conta-1")
+    assert after["contextos"] == 1 and after["ultima_escrita"] < before
+    # Conversa na lixeira: as mensagens de conta-2 somem da contagem e da última escrita.
+    conn.execute("UPDATE conversations SET trashed_at = 1, trash_root = 'y'")
+    conn.execute("UPDATE preferences SET purged_at = 1, text_ct = NULL")
+    entry = last("conta-2")
+    assert entry["mensagens"] == 0 and entry["preferencias"] == 0
+    assert entry["ultima_escrita"] is None

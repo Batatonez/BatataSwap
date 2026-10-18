@@ -71,19 +71,24 @@ def _activity(conn, deps: OAuthDeps, now: int) -> dict:
         prefs = _scalar(
             conn, f"SELECT COUNT(*) FROM preferences WHERE source_label = ? AND {live}", (label,)
         )
+        live_msg = (
+            "m.purged_at IS NULL AND m.trashed_at IS NULL "
+            "AND c.purged_at IS NULL AND c.trashed_at IS NULL"
+        )
+        messages_from = (
+            "FROM messages m JOIN message_batches b ON b.id = m.batch_id "
+            "JOIN conversations c ON c.id = m.conversation_id "
+            "JOIN oauth_grants g ON g.id = b.grant_id"
+        )
         messages = _scalar(
-            conn,
-            "SELECT COUNT(*) FROM messages m JOIN message_batches b ON b.id = m.batch_id "
-            "JOIN oauth_grants g ON g.id = b.grant_id "
-            "WHERE g.label = ? AND m.purged_at IS NULL AND m.trashed_at IS NULL",
-            (label,),
+            conn, f"SELECT COUNT(*) {messages_from} WHERE g.label = ? AND {live_msg}", (label,)
         )
         last = conn.execute(
             "SELECT MAX(t) FROM ("
-            " SELECT MAX(created_at) AS t FROM contexts WHERE source_label = ?"
-            " UNION ALL SELECT MAX(created_at) FROM preferences WHERE source_label = ?"
-            " UNION ALL SELECT MAX(b.created_at) FROM message_batches b"
-            "  JOIN oauth_grants g ON g.id = b.grant_id WHERE g.label = ?)",
+            f" SELECT MAX(created_at) AS t FROM contexts WHERE source_label = ? AND {live}"
+            f" UNION ALL SELECT MAX(created_at) FROM preferences WHERE source_label = ? AND {live}"
+            f" UNION ALL SELECT MAX(m.created_at) {messages_from}"
+            f"  WHERE g.label = ? AND {live_msg})",
             (label, label, label),
         ).fetchone()[0]
         per_account.append(
