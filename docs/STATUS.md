@@ -8,7 +8,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 ## Pronto
 
 - T10: ferramentas MCP + app.py (painel plugado), revisado e corrigido. 670 testes.
-- T14 com o Davi: instalado (fb1d8ac), `public_origin` configurado, key-init feito (**a chave mestra apareceu no chat; o Davi recusou gerar outra — risco aceito por ele**), init feito (senha + TOTP), `batataswap.service` ativo e `/saude` ok localmente. Próximo: atualizar pro SHA com as correções da T10/T12 e ensaio T13b com Funnel temporário.
+- T14 com o Davi: instalado (fb1d8ac), `public_origin` configurado, key-init feito (**a chave mestra apareceu no chat; o Davi recusou gerar outra — risco aceito por ele**), init feito (senha + TOTP), `batataswap.service` ativo e `/saude` ok localmente. Próximo: atualizar pro SHA 768645325810610f89aa2478fab2e88c0fe1dbbb e ensaio T13b (Funnel temporário, só conta-1). T16 (revisão nível 4) iniciada sobre esse SHA.
 - T15: interface da Vercel em `web/` (modo demo; `API_ORIGIN_AQUI` em `config.js` e no CSP do `vercel.json` a trocar pela origem real). Revisada pelo gpt-6.1-sol, correções aplicadas.
 - T02: esqueleto (`pyproject.toml`, `python -m batataswap --version`, CI, `requirements.lock` com hash, `NOTICE.md`).
 - Codex logado; luna, sol e astra respondem.
