@@ -78,3 +78,4 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-18 | T16 5ª passada (revisão) | 4 | gpt-6-astra | não expor: 2 IMPORTANTES de DoS (envio preso antes dos headers, respostas da borda sem prazo) |
 | 2026-10-18 | T16 prazo de escrita na conexão (transport.py, H11Protocol com drain de 10 s) | 3 | worker-opus | ok (781 testes) |
 | 2026-10-18 | T16 6ª passada (revisão) | 4 | gpt-6-astra | **expor**: nenhum crítico/importante. T16 concluída |
+| 2026-10-18 | Rewrite /callback da Vercel (cleanUrls exige destino sem .html) | 1 | worker-haiku | ok |

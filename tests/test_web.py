@@ -70,6 +70,17 @@ def test_vercel_json():
     assert headers["Referrer-Policy"] == "no-referrer"
 
 
+def test_vercel_rewrites_com_clean_urls():
+    cfg = json.loads((WEB / "vercel.json").read_text(encoding="utf-8"))
+    if cfg.get("cleanUrls") is True:
+        for r in cfg.get("rewrites", []):
+            assert not r["destination"].endswith(".html"), (
+                f"rewrite {r['source']} aponta para {r['destination']} com cleanUrls ligado"
+            )
+    rewrites = {r["source"]: r["destination"] for r in cfg.get("rewrites", [])}
+    assert rewrites.get("/callback") == "/painel"
+
+
 def test_csp_sem_curinga():
     cfg = json.loads((WEB / "vercel.json").read_text(encoding="utf-8"))
     headers = {h["key"]: h["value"] for r in cfg["headers"] for h in r["headers"]}
