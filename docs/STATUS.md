@@ -76,4 +76,4 @@ Veredito: "não expor". Nenhum crítico e nenhuma quebra de autenticação ou co
 - **I2**: ondas de corpos incompletos seguram as vagas do pool `/oauth/token` e um refresh legítimo recebe 503. Correção: ler o corpo sem ocupar vaga, com prazo contado desde a entrada, e só depois pegar a vaga.
 - **S1** (sugestão): `logs.py` perde o contador agregado do fim da rajada. Correção: flush periódico e no shutdown.
 
-Em andamento: worker-opus, brief 028. Se a sessão cair antes do commit, refazer a partir desta descrição. Depois: 4ª passada do gpt-6-astra só nesses pontos.
+Corrigido pelo worker-opus (commit "T16: residuais da 3ª passada"). Em andamento: 4ª passada do gpt-6-astra só nesses pontos (brief 029). Se a sessão cair, rodar de novo.

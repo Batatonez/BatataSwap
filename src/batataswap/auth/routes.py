@@ -421,7 +421,7 @@ async def _token(deps: OAuthDeps, request: Request) -> Response:
 async def _revoke(deps: OAuthDeps, request: Request) -> Response:
     form = await _form(request)
     if form is not None:
-        await _db(deps, oauth.revoke_token, deps.config, form, deps.clock())
+        await _db(deps, oauth.revoke_token, deps.config, form, deps.clock(), deps.keyring)
     deps.emit("token_revogado", 200)
     return Response(b"", status_code=200, headers=_NO_STORE)
 

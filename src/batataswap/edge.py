@@ -9,7 +9,7 @@ exigida e recusa cedo o que nem tem a forma certa. Ordem das checagens:
 2. CORS/preflight, antes de qualquer credencial;
 3. Origin em métodos que mudam estado;
 4. presença e forma da credencial; validação do Bearer pelo RS;
-5. corpo contado em streaming;
+5. corpo contado em streaming (anônimo: sem vaga, prazo desde a entrada; vaga só depois);
 6. headers de segurança em toda resposta, inclusive nos erros da própria borda.
 
 O uvicorn precisa rodar com ``server_header=False``, ``proxy_headers=False`` e
@@ -389,6 +389,8 @@ class EdgeMiddleware:
             await send({"type": "websocket.close", "code": 1008})
 
     async def _http(self, scope, receive, send):
+        # O prazo do corpo anônimo conta desde aqui, a entrada na borda.
+        entered = asyncio.get_running_loop().time()
         # 0. Limpa o escopo. Nada depois disso enxerga IP, proxy ou esquema vindo de fora.
         headers = [
             (n.lower(), v)
@@ -525,7 +527,15 @@ class EdgeMiddleware:
                 send, 413, "corpo_grande", cors=cors, cors_origin=cors_origin
             )
 
+        # Corpo anônimo é lido SEM vaga do pool e com prazo contado desde a entrada: um corpo
+        # incompleto nunca segura a admissão de um corpo pronto. A memória fica limitada pelo
+        # teto de 8 KiB vezes o ``limit_concurrency`` do uvicorn. Só com o corpo completo a
+        # requisição disputa a vaga do pool, que fica com ela durante o handler (scrypt etc.).
         anonymous = not rule.category.startswith("bearer:")
+        deadline = entered + self._body_timeout(rule, scope["path"]) if anonymous else None
+        chunks = await self._read_body(scope, receive, send, rule, limit, cors_origin, deadline)
+        if chunks is None:
+            return
         bodyless = (
             scope["method"] in {"GET", "HEAD"}
             and (not lengths or int(lengths[0]) == 0)
@@ -551,38 +561,40 @@ class EdgeMiddleware:
                     cors_origin=cors_origin,
                     extra=[(b"retry-after", b"1")],
                 )
-        released = False
-
-        def release():
-            nonlocal released
-            if acquired and not released:
-                pool.release()
-                released = True
-
         try:
-            await self._forward(scope, receive, send, rule, limit, cors_origin, release)
+            await self._call_app(scope, receive, send, rule, cors_origin, chunks)
         finally:
-            release()
+            if acquired:
+                pool.release()
 
-    async def _forward(self, scope, receive, send, rule, limit, cors_origin, release):
-        # O corpo inteiro é lido e contado ANTES de chamar o app: com corpo grande demais o
-        # handler nem roda, então nenhum efeito dele acontece. Os tetos são pequenos (≤ 256 KiB).
+    def _body_timeout(self, rule, path: str) -> float:
+        if rule.category.startswith("bearer:"):
+            return self.body_total_timeout
+        return min(self.body_total_timeout, 1 if path == "/oauth/token" else 3)
+
+    async def _read_body(self, scope, receive, send, rule, limit, cors_origin, deadline=None):
+        """Lê e conta o corpo inteiro ANTES de chamar o app; ``None`` se já respondeu.
+
+        Com corpo grande demais o handler nem roda, então nenhum efeito dele acontece. Os tetos
+        são pequenos (≤ 256 KiB). ``deadline`` (relógio do loop) vem da entrada na borda para
+        corpo anônimo; sem ele, o prazo começa agora.
+        """
         chunks: list[bytes] = []
         received = 0
-        timeout = self.body_total_timeout
         if not rule.category.startswith("bearer:"):
             limit = min(limit, 8192)
-            timeout = min(timeout, 1 if scope["path"] == "/oauth/token" else 3)
-        deadline = asyncio.get_running_loop().time() + timeout
+        loop = asyncio.get_running_loop()
+        if deadline is None:
+            deadline = loop.time() + self._body_timeout(rule, scope["path"])
         while True:
             try:
-                remaining = deadline - asyncio.get_running_loop().time()
+                remaining = deadline - loop.time()
                 if remaining <= 0:
                     raise TimeoutError
                 async with asyncio.timeout(min(remaining, self.body_idle_timeout)):
                     message = await receive()
             except TimeoutError:
-                return await self._send_error(
+                await self._send_error(
                     send,
                     408,
                     "corpo_timeout",
@@ -590,23 +602,26 @@ class EdgeMiddleware:
                     cors_origin=cors_origin,
                     extra=((b"connection", b"close"),),
                 )
+                return None
             if message.get("type") != "http.request":
-                return  # cliente desconectou no meio do corpo: não há a quem responder
+                return None  # cliente desconectou no meio do corpo: não há a quem responder
             body = message.get("body", b"")
             if scope["method"] in {"GET", "HEAD"} and body:
-                return await self._send_error(
+                await self._send_error(
                     send, 400, "requisicao_invalida", cors=rule.cors, cors_origin=cors_origin
                 )
+                return None
             received += len(body)
             if received > limit:
-                return await self._send_error(
+                await self._send_error(
                     send, 413, "corpo_grande", cors=rule.cors, cors_origin=cors_origin
                 )
+                return None
             chunks.append(body)
             if not message.get("more_body", False):
-                break
+                return chunks
 
-        release()
+    async def _call_app(self, scope, receive, send, rule, cors_origin, chunks):
         replayed = False
         started = False
 

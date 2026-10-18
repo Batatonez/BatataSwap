@@ -148,7 +148,11 @@ def exchange(env, auth_code, verifier, now=NOW, **changes):
     }
     params.update(changes)
     return oauth.token_request(
-        env.conn, env.config, {k: [v] for k, v in params.items() if v is not None}, now
+        env.conn,
+        env.config,
+        {k: [v] for k, v in params.items() if v is not None},
+        now,
+        env.keyring,
     )
 
 
@@ -160,7 +164,11 @@ def refresh(env, token, now, **changes):
     }
     params.update(changes)
     return oauth.token_request(
-        env.conn, env.config, {k: [v] for k, v in params.items() if v is not None}, now
+        env.conn,
+        env.config,
+        {k: [v] for k, v in params.items() if v is not None},
+        now,
+        env.keyring,
     )
 
 
@@ -713,6 +721,7 @@ def test_code_concurrent_exchange_single_winner(env):
                         "resource": [ORIGIN + "/mcp"],
                     },
                     NOW,
+                    env.keyring,
                 )
                 results.append("ok")
             except oauth.OAuthError as error:
@@ -823,6 +832,7 @@ def test_refresh_concurrent_single_winner(env):
                         "client_id": [CLAUDE_CIMD_CLIENT_ID],
                     },
                     NOW + 50,
+                    env.keyring,
                 )
                 winners.append(issued)
                 results.append("ok")
@@ -885,7 +895,7 @@ def test_access_capped_by_grant(env):
 
 def revoke(env, token, now=NOW, **extra):
     params = {"token": [token], **{k: [v] for k, v in extra.items()}}
-    oauth.revoke_token(env.conn, env.config, params, now)
+    oauth.revoke_token(env.conn, env.config, params, now, env.keyring)
 
 
 def test_revoke_access_and_refresh(env):
@@ -903,8 +913,8 @@ def test_revoke_access_and_refresh(env):
     with pytest.raises(oauth.OAuthError):
         refresh(env, second.refresh_token, NOW + 3)
     assert env.conn.execute("SELECT revoked_at FROM oauth_grants").fetchone()[0] == NOW
-    oauth.revoke_token(env.conn, env.config, {}, NOW)
-    oauth.revoke_token(env.conn, env.config, {"token": ["a", "b"]}, NOW)
+    oauth.revoke_token(env.conn, env.config, {}, NOW, env.keyring)
+    oauth.revoke_token(env.conn, env.config, {"token": ["a", "b"]}, NOW, env.keyring)
 
 
 def test_revoke_grant_helper(env):
@@ -1091,7 +1101,9 @@ def test_unknown_credentials_do_not_acquire_write_lock(env):
             exchange(env, "x" * 43, "v" * 43)
         with pytest.raises(oauth.OAuthError, match="invalid_grant"):
             refresh(env, "bsw_rt_" + "x" * 43, NOW)
-        oauth.revoke_token(env.conn, env.config, {"token": ["bsw_at_" + "x" * 43]}, NOW)
+        oauth.revoke_token(
+            env.conn, env.config, {"token": ["bsw_at_" + "x" * 43]}, NOW, env.keyring
+        )
     finally:
         env.conn.set_trace_callback(None)
     assert not any(statement.startswith("BEGIN") for statement in statements)

@@ -1073,15 +1073,15 @@ def test_body_deadlines(slow):
         async def send(message):
             sent.append(message)
 
-        await edge._forward(
+        chunks = await edge._read_body(
             {"path": "/saude", "method": "POST"},
             receive,
             send,
             RoutePolicy.default().for_path("/saude")[0],
             10000,
             None,
-            lambda: None,
         )
+        assert chunks is None
         assert sent[0]["status"] == 408
         assert (b"connection", b"close") in sent[0]["headers"]
         assert toy.calls == 0
@@ -1128,7 +1128,7 @@ def test_slowloris_64_anonymous_readers_preserves_bearer(env):  # noqa: F811
                 nonlocal entered
                 if slow:
                     entered += 1
-                    if entered == 8:
+                    if entered == 64:
                         full.set()
                     await unblock.wait()
                 return {"type": "http.request", "body": b"{}", "more_body": False}
@@ -1143,11 +1143,13 @@ def test_slowloris_64_anonymous_readers_preserves_bearer(env):  # noqa: F811
         await asyncio.wait_for(full.wait(), 1)
         await asyncio.sleep(0)
         assert sum(t.done() for t in readers) == 0
+        # Leitura anônima não ocupa vaga: as 64 estão lendo e o pool continua inteiro.
+        assert edge._body_slots["token"]._value == 8
         assert await asyncio.wait_for(request("/mcp", access), 1) == 200
         # Bearer com formato válido, porém desconhecido, não chega a ler o corpo.
         assert await asyncio.wait_for(request("/mcp", "B" * 32, slow=True), 1) == 401
         assert validated == ["mcp", "mcp"]
-        assert entered == 8
+        assert entered == 64
         unblock.set()
         statuses = await asyncio.gather(*readers)
         assert statuses.count(200) == 64

@@ -36,6 +36,8 @@ LAST_USED_EVERY = 60
 STATE_MAX = 512
 PAINEL_LABEL = "painel"
 ACCESS_PREFIX = "bsw_at_"
+# Único formato aceito de access token: aleatório de 43 + "." + tag HMAC de 22.
+_ACCESS_TOKEN = re.compile(r"bsw_at_[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{22}")
 REFRESH_PREFIX = "bsw_rt_"
 SCOPE_ORDER = ("memoria", "painel", "offline_access")
 AUDIT_EVENTS = frozenset(
@@ -684,11 +686,11 @@ def _client_policy(config: Config, params) -> tuple[str, ClientPolicy]:
     return client_id, policy
 
 
-def _issue(conn, grant, policy: ClientPolicy, family_id, code_hash, scope_out, now, keyring=None):
+def _issue(conn, grant, policy: ClientPolicy, family_id, code_hash, scope_out, now, keyring):
     grant_id, public_id, grant_expires = grant
+    # Todo access token sai com a tag HMAC: o RS recusa em CPU, sem banco, o que não tiver.
     access = new_token(ACCESS_PREFIX)
-    if keyring is not None:
-        access += "." + access_tag(keyring, access[len(ACCESS_PREFIX) :])
+    access += "." + access_tag(keyring, access[len(ACCESS_PREFIX) :])
     access_exp = min(now + policy.access_ttl, grant_expires)
     conn.execute(
         "INSERT INTO oauth_tokens(token_hash,kind,grant_id,family_id,code_hash,expires_at,scope) "
@@ -723,7 +725,7 @@ def _pkce_ok(verifier: str | None, challenge: str) -> bool:
     return hmac.compare_digest(computed, challenge)
 
 
-def _exchange_code(conn, config: Config, params, now: int, keyring=None) -> TokenResponse:
+def _exchange_code(conn, config: Config, params, now: int, keyring) -> TokenResponse:
     code = _one(params, "code")
     redirect_uri = _one(params, "redirect_uri")
     verifier = _one(params, "code_verifier")
@@ -812,7 +814,7 @@ def _exchange_code(conn, config: Config, params, now: int, keyring=None) -> Toke
     raise _err("invalid_grant", "codigo invalido ou expirado")
 
 
-def _refresh(conn, config: Config, params, now: int, keyring=None) -> TokenResponse:
+def _refresh(conn, config: Config, params, now: int, keyring) -> TokenResponse:
     refresh = _one(params, "refresh_token")
     scope = _one(params, "scope")
     resource = _one(params, "resource")
@@ -944,7 +946,11 @@ def _refresh(conn, config: Config, params, now: int, keyring=None) -> TokenRespo
 
 
 def token_request(
-    conn: sqlite3.Connection, config: Config, params: dict[str, list[str]], now: float, keyring=None
+    conn: sqlite3.Connection,
+    config: Config,
+    params: dict[str, list[str]],
+    now: float,
+    keyring: Keyring,
 ) -> TokenResponse:
     """``POST /oauth/token`` já com o corpo parseado. Levanta ``OAuthError``."""
     try:
@@ -966,9 +972,16 @@ def token_request(
 
 
 def revoke_token(
-    conn: sqlite3.Connection, config: Config, params: dict[str, list[str]], now: float
+    conn: sqlite3.Connection,
+    config: Config,
+    params: dict[str, list[str]],
+    now: float,
+    keyring: Keyring,
 ) -> None:
-    """Revoga access (só ele) ou refresh (a família inteira e o grant). Nunca levanta."""
+    """Revoga access (só ele) ou refresh (a família inteira e o grant). Nunca levanta.
+
+    Access token sem a tag HMAC certa nem chega ao banco (não existe nenhum válido assim).
+    """
     now = int(now)
     try:
         token = _one(params, "token")
@@ -976,6 +989,8 @@ def revoke_token(
     except _Duplicate:
         return
     if not _opaque(token):
+        return
+    if token.startswith(ACCESS_PREFIX) and not access_tag_ok(keyring, token):
         return
     if (
         conn.execute(
@@ -1035,18 +1050,23 @@ def access_tag(keyring, random: str) -> str:
     return base64.urlsafe_b64encode(keyring.mac("access", random.encode("ascii"))).decode()[:22]
 
 
+def access_tag_ok(keyring, token: object) -> bool:
+    """Só CPU: formato ``bsw_at_<43>.<22>`` e tag HMAC conferida. Sem tag não existe mais."""
+    if not isinstance(token, str) or not _ACCESS_TOKEN.fullmatch(token):
+        return False
+    random, tag = token[len(ACCESS_PREFIX) :].split(".")
+    return hmac.compare_digest(tag, access_tag(keyring, random))
+
+
 def precheck_access(keyring, token, resource):
-    valid = isinstance(token, str) and re.fullmatch(
-        r"bsw_at_[A-Za-z0-9_-]{43}(?:\.[A-Za-z0-9_-]{22})?", token
-    )
-    if valid and "." in token:
-        random, tag = token[len(ACCESS_PREFIX) :].split(".")
-        valid = hmac.compare_digest(tag, access_tag(keyring, random))
-    if not valid:
+    """Recusa (401 com ``WWW-Authenticate``) antes de qualquer acesso ao banco."""
+    if not access_tag_ok(keyring, token):
         raise BearerError(401, "invalid_token", _www_authenticate(resource, "invalid_token"))
 
 
 def check_access_active(conn, token, resource, now):
+    if not isinstance(token, str) or not _ACCESS_TOKEN.fullmatch(token):
+        raise BearerError(401, "invalid_token", _www_authenticate(resource, "invalid_token"))
     row = conn.execute(
         "SELECT 1 FROM oauth_tokens t JOIN oauth_grants g ON g.id=t.grant_id "
         "WHERE t.token_hash=? AND t.revoked_at IS NULL AND g.revoked_at IS NULL "
@@ -1072,7 +1092,7 @@ def validate_bearer(
             401, "invalid_token", _www_authenticate(expected_resource, "invalid_token")
         )
 
-    if not _opaque(token) or not token.startswith(ACCESS_PREFIX):
+    if not isinstance(token, str) or not _ACCESS_TOKEN.fullmatch(token):
         raise invalid()
     row = conn.execute(
         "SELECT g.id, g.public_id, g.label, COALESCE(t.scope, g.scope), g.resource, "

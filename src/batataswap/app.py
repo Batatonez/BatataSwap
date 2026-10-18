@@ -1,5 +1,7 @@
 """Montagem do servidor: borda externa, OAuth próprio e transporte oficial MCP."""
 
+import asyncio
+import contextlib
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -24,6 +26,8 @@ from batataswap.edge import EdgeMiddleware, RoutePolicy
 from batataswap.memory import Actor
 from batataswap.panel_api import panel_routes
 from batataswap.tools import register_tools, request_actor
+
+LOG_FLUSH_EVERY = 5
 
 
 def _grant_atual():
@@ -154,8 +158,22 @@ def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_rout
                 conn.close()
 
         await anyio.to_thread.run_sync(migrate)
-        async with transport.router.lifespan_context(transport):
-            yield
+
+        async def flush_logs():
+            # Publica o fim das rajadas agregadas sem depender de um evento novo (S1, T16).
+            while True:
+                await asyncio.sleep(LOG_FLUSH_EVERY)
+                logs.flush()
+
+        flusher = asyncio.create_task(flush_logs())
+        try:
+            async with transport.router.lifespan_context(transport):
+                yield
+        finally:
+            flusher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await flusher
+            logs.flush(force=True)
 
     inner = Starlette(routes=routes, lifespan=lifespan)
     inner.router.redirect_slashes = False

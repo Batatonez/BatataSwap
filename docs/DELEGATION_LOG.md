@@ -72,3 +72,4 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-18 | Davi decidiu NÃO fazer `registrar_uso` (uso do plano não tem API; raspagem fora de questão) | — | — | — |
 | 2026-10-18 | /saude com CORS aberto (status ao vivo sem ligar o painel) | 2 | worker-haiku | ok |
 | 2026-10-18 | Site sem modo demonstração (pedido do Davi: nada de dado falso) | 2 | worker-sonnet | ok (753 testes no total) |
+| 2026-10-18 | T16 residuais da 3ª passada (I1 token sem tag, I2 ondas de corpo lento, S1 flush do log) | 3 | worker-opus | ok (764 testes) |

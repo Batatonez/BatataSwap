@@ -69,9 +69,37 @@ TOOLS = frozenset(
 ADMIN = False
 
 
-_AGGREGATED = {"credencial_ausente", "requisicao_invalida", "sem_vaga_corpo", "rota_inexistente"}
+# Eventos que um visitante anônimo consegue disparar em rajada. Por (evento, status), cada
+# janela de AGGREGATE_WINDOW segundos publica a primeira linha na hora e o resto vira contador,
+# publicado pelo próximo evento igual depois da janela ou pelo ``flush`` periódico/no shutdown.
+_AGGREGATED = {
+    "credencial_ausente",
+    "requisicao_invalida",
+    "sem_vaga_corpo",
+    "rota_inexistente",
+    "corpo_timeout",
+    "token_recusado",
+    "repassado",
+}
+AGGREGATE_WINDOW = 10
 _counts = {}
 _counts_lock = threading.Lock()
+
+
+def flush(*, force=False):
+    """Publica os contadores pendentes cuja janela já fechou (todos, com ``force``).
+
+    O app chama periodicamente e no encerramento, para o fim de uma rajada não sumir.
+    """
+    pending = []
+    with _counts_lock:
+        now = time.monotonic()
+        for key, (last, count) in list(_counts.items()):
+            if count and (force or now - last >= AGGREGATE_WINDOW):
+                _counts[key] = (now, 0)
+                pending.append((key, count))
+    for (evento, status), count in pending:
+        _write(evento, status, contador=count)
 
 
 def emit(evento, status=None, *, ms=None, grant=None, tamanho=None, nivel="info", ferramenta=None):
@@ -79,18 +107,42 @@ def emit(evento, status=None, *, ms=None, grant=None, tamanho=None, nivel="info"
         return
     count = None
     if evento in _AGGREGATED:
+        key = (evento, status if type(status) is int else None)
         with _counts_lock:
             now = time.monotonic()
-            last, count = _counts.get(evento, (float("-inf"), 0))
+            last, count = _counts.get(key, (float("-inf"), 0))
             count += 1
-            if now - last < 10:
-                _counts[evento] = (last, count)
+            if now - last < AGGREGATE_WINDOW:
+                _counts[key] = (last, count)
                 return
-            _counts[evento] = (now, 0)
+            _counts[key] = (now, 0)
+    _write(
+        evento,
+        status,
+        ms=ms,
+        grant=grant,
+        tamanho=tamanho,
+        nivel=nivel,
+        ferramenta=ferramenta,
+        contador=count,
+    )
+
+
+def _write(
+    evento,
+    status,
+    *,
+    ms=None,
+    grant=None,
+    tamanho=None,
+    nivel="info",
+    ferramenta=None,
+    contador=None,
+):
     record = dict.fromkeys(("evento", "status", "ms", "grant", "tamanho", "nivel"))
     record["evento"] = evento
-    if count is not None:
-        record["contador"] = count
+    if type(contador) is int and contador > 0:
+        record["contador"] = contador
     if type(status) is int and 0 <= status <= 599:
         record["status"] = status
     if type(ms) in (int, float) and 0 <= ms < 1e12:
