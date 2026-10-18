@@ -133,9 +133,16 @@ def call(
     query=b"",
     scope_type="http",
     extensions=None,
+    auto_content_length=True,
 ):
     hdrs = [] if host is None else [("host", host)]
     hdrs += list(headers or [])
+    if (
+        auto_content_length
+        and path == "/oauth/token"
+        and not any(k.lower() == "content-length" for k, _ in hdrs)
+    ):
+        hdrs.append(("content-length", "0"))
     scope = {
         "type": scope_type,
         "asgi": {"version": "3.0"},
@@ -739,7 +746,7 @@ def test_desconexao_no_meio_do_corpo_nao_chama_app():
         "path": "/oauth/token",
         "raw_path": b"/oauth/token",
         "query_string": b"",
-        "headers": [(b"host", HOST.encode())],
+        "headers": [(b"host", HOST.encode()), (b"content-length", b"0")],
     }
     asyncio.run(edge(scope, receive, send))
     assert sent == [] and app.calls == 0
@@ -996,7 +1003,7 @@ def test_body_deadlines(slow):
             sent.append(message)
 
         await edge._forward(
-            {"path": "/saude"},
+            {"path": "/saude", "method": "POST"},
             receive,
             send,
             RoutePolicy.default().for_path("/saude")[0],
@@ -1034,7 +1041,7 @@ def test_slowloris_64_anonymous_readers_preserves_bearer(env):  # noqa: F811
         async def request(path, token=None, slow=False):
             nonlocal entered
             messages = []
-            headers = [(b"host", HOST.encode())]
+            headers = [(b"host", HOST.encode()), (b"content-length", b"2")]
             if token:
                 headers.append((b"authorization", ("Bearer " + token).encode()))
             scope = {
@@ -1064,7 +1071,7 @@ def test_slowloris_64_anonymous_readers_preserves_bearer(env):  # noqa: F811
         readers = [asyncio.create_task(request("/oauth/token", slow=True)) for _ in range(64)]
         await asyncio.wait_for(full.wait(), 1)
         await asyncio.sleep(0)
-        assert sum(t.done() for t in readers) == 56
+        assert sum(t.done() for t in readers) == 0
         assert await asyncio.wait_for(request("/mcp", access), 1) == 200
         # Bearer com formato válido, porém desconhecido, não chega a ler o corpo.
         assert await asyncio.wait_for(request("/mcp", "B" * 32, slow=True), 1) == 401
@@ -1072,10 +1079,9 @@ def test_slowloris_64_anonymous_readers_preserves_bearer(env):  # noqa: F811
         assert entered == 8
         unblock.set()
         statuses = await asyncio.gather(*readers)
-        assert statuses.count(503) == 56
-        assert statuses.count(200) == 8
+        assert statuses.count(200) == 64
         assert edge._body_slots["token"]._value == 8
-        assert toy.calls == 9
+        assert toy.calls == 65
 
     asyncio.run(run())
 

@@ -59,6 +59,7 @@ class OAuthDeps:
     budget: Budget
     slot: ScryptSlot
     fetcher: Fetcher = httpx_fetcher
+    bearer_limiter: anyio.CapacityLimiter = field(default_factory=lambda: anyio.CapacityLimiter(4))
     panel_budget: Budget = field(default_factory=Budget)
     device_creation_rates: dict = field(default_factory=dict)
     creation_rate: CreationRate = field(default_factory=lambda: CreationRate(30, 600))
@@ -409,7 +410,7 @@ async def _token(deps: OAuthDeps, request: Request) -> Response:
         deps.emit("token_recusado", 400)
         return _token_error(oauth.OAuthError("invalid_request", "corpo urlencoded obrigatorio"))
     try:
-        result = await _db(deps, oauth.token_request, deps.config, form, deps.clock())
+        result = await _db(deps, oauth.token_request, deps.config, form, deps.clock(), deps.keyring)
     except oauth.OAuthError as error:
         deps.emit("token_recusado", error.status)
         return _token_error(error)
@@ -489,7 +490,13 @@ async def bearer_context(deps: OAuthDeps, scope, which: str) -> oauth.AccessCont
     else:
         raise ValueError("recurso desconhecido")
     token = (scope.get("state") or {}).get("bearer")
-    return await _db(deps, oauth.validate_bearer, token, resource, required, deps.clock())
+    oauth.precheck_access(deps.keyring, token, resource)
+    async with deps.bearer_limiter:
+        cached = scope["state"].get("access_context")
+        if cached is not None:
+            await _db(deps, oauth.check_access_active, token, resource, deps.clock())
+            return cached
+        return await _db(deps, oauth.validate_bearer, token, resource, required, deps.clock())
 
 
 def bearer_error_response(error: oauth.BearerError) -> JSONResponse:

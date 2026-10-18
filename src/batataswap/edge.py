@@ -55,6 +55,7 @@ EVENTS = frozenset(
         "origem_recusada",
         "credencial_ausente",
         "requisicao_invalida",
+        "sem_vaga_corpo",
         "corpo_grande",
         "erro_interno",
         "repassado",
@@ -391,6 +392,7 @@ class EdgeMiddleware:
         ]
         state = dict(scope.get("state") or {})
         state.pop("bearer", None)
+        state.pop("access_context", None)
         scope = {
             **scope,
             "headers": headers,
@@ -474,7 +476,9 @@ class EdgeMiddleware:
                 from batataswap.auth.oauth import BearerError
 
                 try:
-                    await self.bearer_validator(scope, rule.category.split(":")[1])
+                    state["access_context"] = await self.bearer_validator(
+                        scope, rule.category.split(":")[1]
+                    )
                 except BearerError as error:
                     return await self._send_error(
                         send,
@@ -507,6 +511,13 @@ class EdgeMiddleware:
             return await self._send_error(
                 send, 400, "requisicao_invalida", cors=cors, cors_origin=cors_origin
             )
+        if (path == "/oauth/token" and (not lengths or values(b"transfer-encoding"))) or (
+            method in {"GET", "HEAD"}
+            and (values(b"transfer-encoding") or (lengths and int(lengths[0]) != 0))
+        ):
+            return await self._send_error(
+                send, 400, "requisicao_invalida", cors=cors, cors_origin=cors_origin
+            )
         if lengths and int(lengths[0]) > limit:
             return await self._send_error(
                 send, 413, "corpo_grande", cors=cors, cors_origin=cors_origin
@@ -527,17 +538,17 @@ class EdgeMiddleware:
         ]
         acquired = anonymous and not bodyless
         if acquired:
-            if pool.locked():
+            try:
+                await asyncio.wait_for(pool.acquire(), timeout=2)
+            except TimeoutError:
                 return await self._send_error(
                     send,
                     503,
-                    "requisicao_invalida",
+                    "sem_vaga_corpo",
                     cors=cors,
                     cors_origin=cors_origin,
                     extra=[(b"retry-after", b"1")],
                 )
-            # Sem espera: no mesmo loop, acquire com vaga livre não suspende.
-            await pool.acquire()
         released = False
 
         def release():
@@ -559,7 +570,7 @@ class EdgeMiddleware:
         timeout = self.body_total_timeout
         if not rule.category.startswith("bearer:"):
             limit = min(limit, 8192)
-            timeout = min(timeout, 2 if scope["path"] == "/oauth/token" else 3)
+            timeout = min(timeout, 1 if scope["path"] == "/oauth/token" else 3)
         deadline = asyncio.get_running_loop().time() + timeout
         while True:
             try:
@@ -580,6 +591,10 @@ class EdgeMiddleware:
             if message.get("type") != "http.request":
                 return  # cliente desconectou no meio do corpo: não há a quem responder
             body = message.get("body", b"")
+            if scope["method"] in {"GET", "HEAD"} and body:
+                return await self._send_error(
+                    send, 400, "requisicao_invalida", cors=rule.cors, cors_origin=cors_origin
+                )
             received += len(body)
             if received > limit:
                 return await self._send_error(

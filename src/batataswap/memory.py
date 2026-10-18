@@ -160,6 +160,8 @@ def name_key(keyring: Keyring, purpose: str, name: str) -> bytes:
 def check_text(value: object, what: str, max_chars: int, *, allow_empty: bool = False) -> str:
     if not isinstance(value, str):
         raise InvalidInput(f"{what}: precisa ser texto.")
+    if any((ord(c) < 32 or 127 <= ord(c) <= 159) and c not in "\n\t" for c in value):
+        raise InvalidInput(f"{what}: caracteres de controle inválidos.")
     if not value and not allow_empty:
         raise InvalidInput(f"{what}: não pode ser vazio.")
     if len(value) > max_chars:

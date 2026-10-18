@@ -39,7 +39,14 @@ ACCESS_PREFIX = "bsw_at_"
 REFRESH_PREFIX = "bsw_rt_"
 SCOPE_ORDER = ("memoria", "painel", "offline_access")
 AUDIT_EVENTS = frozenset(
-    {"grant_criado", "grant_revogado", "token_emitido", "refresh_reuso", "codigo_reuso"}
+    {
+        "grant_criado",
+        "grant_revogado",
+        "token_emitido",
+        "refresh_reuso",
+        "refresh_reuso_tolerado",
+        "codigo_reuso",
+    }
 )
 
 _CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -677,9 +684,11 @@ def _client_policy(config: Config, params) -> tuple[str, ClientPolicy]:
     return client_id, policy
 
 
-def _issue(conn, grant, policy: ClientPolicy, family_id, code_hash, scope_out, now):
+def _issue(conn, grant, policy: ClientPolicy, family_id, code_hash, scope_out, now, keyring=None):
     grant_id, public_id, grant_expires = grant
     access = new_token(ACCESS_PREFIX)
+    if keyring is not None:
+        access += "." + access_tag(keyring, access[len(ACCESS_PREFIX) :])
     access_exp = min(now + policy.access_ttl, grant_expires)
     conn.execute(
         "INSERT INTO oauth_tokens(token_hash,kind,grant_id,family_id,code_hash,expires_at,scope) "
@@ -714,7 +723,7 @@ def _pkce_ok(verifier: str | None, challenge: str) -> bool:
     return hmac.compare_digest(computed, challenge)
 
 
-def _exchange_code(conn, config: Config, params, now: int) -> TokenResponse:
+def _exchange_code(conn, config: Config, params, now: int, keyring=None) -> TokenResponse:
     code = _one(params, "code")
     redirect_uri = _one(params, "redirect_uri")
     verifier = _one(params, "code_verifier")
@@ -797,12 +806,13 @@ def _exchange_code(conn, config: Config, params, now: int) -> TokenResponse:
                 code_hash,
                 grant_scope,
                 now,
+                keyring,
             )
     assert reused
     raise _err("invalid_grant", "codigo invalido ou expirado")
 
 
-def _refresh(conn, config: Config, params, now: int) -> TokenResponse:
+def _refresh(conn, config: Config, params, now: int, keyring=None) -> TokenResponse:
     refresh = _one(params, "refresh_token")
     scope = _one(params, "scope")
     resource = _one(params, "resource")
@@ -814,7 +824,7 @@ def _refresh(conn, config: Config, params, now: int) -> TokenResponse:
     if resource is not None and resource != policy.resource:
         raise _err("invalid_target", "resource invalido para este cliente")
     if not _opaque(refresh):
-        raise _err("invalid_grant", "refresh invalido ou expirado")
+        raise _err("invalid_grant", "credencial invalida ou expirada")
     refresh_hash = token_hash(refresh)
     reused = False
     if (
@@ -834,7 +844,7 @@ def _refresh(conn, config: Config, params, now: int) -> TokenResponse:
             (refresh_hash,),
         ).fetchone()
         if row is None:
-            raise _err("invalid_grant", "refresh invalido ou expirado")
+            raise _err("invalid_grant", "credencial invalida ou expirada")
         (
             grant_id,
             family_id,
@@ -849,9 +859,9 @@ def _refresh(conn, config: Config, params, now: int) -> TokenResponse:
             grant_client,
         ) = row
         if grant_client != client_id:
-            raise _err("invalid_grant", "refresh emitido para outro cliente")
+            raise _err("invalid_grant", "credencial invalida ou expirada")
         if token_revoked is not None or grant_revoked is not None:
-            raise _err("invalid_grant", "autorizacao revogada ou expirada")
+            raise _err("invalid_grant", "credencial invalida ou expirada")
         if used_at is not None:
             successor = conn.execute(
                 "SELECT s.used_at FROM oauth_tokens t JOIN oauth_tokens s "
@@ -859,21 +869,30 @@ def _refresh(conn, config: Config, params, now: int) -> TokenResponse:
                 (refresh_hash,),
             ).fetchone()
             if now - used_at <= 60 and successor is not None and successor[0] is None:
-                raise _err("invalid_grant", "refresh ja utilizado")
-            # Reuso fora da tolerância revoga a família e o grant.
-            conn.execute(
-                "UPDATE oauth_tokens SET revoked_at=? WHERE family_id=? AND revoked_at IS NULL",
-                (now, family_id),
-            )
-            _audit(conn, "refresh_reuso", grant_id, public_id, now)
-            if grant_revoked is None:
-                _revoke_grant(conn, grant_id, public_id, now)
-            reused = True
+                if (
+                    conn.execute(
+                        "SELECT 1 FROM audit WHERE event='refresh_reuso_tolerado' AND target=?",
+                        (family_id,),
+                    ).fetchone()
+                    is None
+                ):
+                    _audit(conn, "refresh_reuso_tolerado", grant_id, family_id, now)
+                reused = True
+            else:
+                # Reuso fora da tolerância revoga a família e o grant.
+                conn.execute(
+                    "UPDATE oauth_tokens SET revoked_at=? WHERE family_id=? AND revoked_at IS NULL",
+                    (now, family_id),
+                )
+                _audit(conn, "refresh_reuso", grant_id, public_id, now)
+                if grant_revoked is None:
+                    _revoke_grant(conn, grant_id, public_id, now)
+                reused = True
         else:
             if token_revoked is not None or token_exp <= now:
-                raise _err("invalid_grant", "refresh invalido ou expirado")
+                raise _err("invalid_grant", "credencial invalida ou expirada")
             if grant_revoked is not None or grant_exp <= now:
-                raise _err("invalid_grant", "autorizacao revogada ou expirada")
+                raise _err("invalid_grant", "credencial invalida ou expirada")
             if grant_resource != policy.resource or (
                 resource is not None and resource != grant_resource
             ):
@@ -904,9 +923,16 @@ def _refresh(conn, config: Config, params, now: int) -> TokenResponse:
                 ).rowcount
                 != 1
             ):
-                raise _err("invalid_grant", "refresh invalido ou expirado")
+                raise _err("invalid_grant", "credencial invalida ou expirada")
             issued = _issue(
-                conn, (grant_id, public_id, grant_exp), policy, family_id, None, scope_out, now
+                conn,
+                (grant_id, public_id, grant_exp),
+                policy,
+                family_id,
+                None,
+                scope_out,
+                now,
+                keyring,
             )
             conn.execute(
                 "UPDATE oauth_tokens SET successor_hash=? WHERE token_hash=?",
@@ -914,19 +940,19 @@ def _refresh(conn, config: Config, params, now: int) -> TokenResponse:
             )
             return issued
     assert reused
-    raise _err("invalid_grant", "refresh invalido ou expirado")
+    raise _err("invalid_grant", "credencial invalida ou expirada")
 
 
 def token_request(
-    conn: sqlite3.Connection, config: Config, params: dict[str, list[str]], now: float
+    conn: sqlite3.Connection, config: Config, params: dict[str, list[str]], now: float, keyring=None
 ) -> TokenResponse:
     """``POST /oauth/token`` já com o corpo parseado. Levanta ``OAuthError``."""
     try:
         grant_type = _one(params, "grant_type")
         if grant_type == "authorization_code":
-            return _exchange_code(conn, config, params, int(now))
+            return _exchange_code(conn, config, params, int(now), keyring)
         if grant_type == "refresh_token":
-            return _refresh(conn, config, params, int(now))
+            return _refresh(conn, config, params, int(now), keyring)
     except _Duplicate:
         raise _err("invalid_request", "parametro repetido") from None
     if grant_type is None:
@@ -1003,6 +1029,32 @@ def _www_authenticate(resource: str, error: str, scope: str | None = None) -> st
         parts.append(f'scope="{scope}"')
     parts.append(f'resource_metadata="{resource_metadata_url(resource)}"')
     return "Bearer " + ", ".join(parts)
+
+
+def access_tag(keyring, random: str) -> str:
+    return base64.urlsafe_b64encode(keyring.mac("access", random.encode("ascii"))).decode()[:22]
+
+
+def precheck_access(keyring, token, resource):
+    valid = isinstance(token, str) and re.fullmatch(
+        r"bsw_at_[A-Za-z0-9_-]{43}(?:\.[A-Za-z0-9_-]{22})?", token
+    )
+    if valid and "." in token:
+        random, tag = token[len(ACCESS_PREFIX) :].split(".")
+        valid = hmac.compare_digest(tag, access_tag(keyring, random))
+    if not valid:
+        raise BearerError(401, "invalid_token", _www_authenticate(resource, "invalid_token"))
+
+
+def check_access_active(conn, token, resource, now):
+    row = conn.execute(
+        "SELECT 1 FROM oauth_tokens t JOIN oauth_grants g ON g.id=t.grant_id "
+        "WHERE t.token_hash=? AND t.revoked_at IS NULL AND g.revoked_at IS NULL "
+        "AND t.expires_at>? AND g.expires_at>?",
+        (token_hash(token), now, now),
+    ).fetchone()
+    if row is None:
+        raise BearerError(401, "invalid_token", _www_authenticate(resource, "invalid_token"))
 
 
 def validate_bearer(

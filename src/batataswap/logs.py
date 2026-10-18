@@ -4,6 +4,8 @@ import contextlib
 import json
 import re
 import socket
+import threading
+import time
 
 EVENTS = frozenset(
     [
@@ -14,6 +16,8 @@ EVENTS = frozenset(
         "grant_revogado",
         "token_emitido",
         "refresh_reuso",
+        "refresh_reuso_tolerado",
+        "sem_vaga_corpo",
         "codigo_reuso",
         "ferramenta",
         "limite",
@@ -65,11 +69,28 @@ TOOLS = frozenset(
 ADMIN = False
 
 
+_AGGREGATED = {"credencial_ausente", "requisicao_invalida", "sem_vaga_corpo", "rota_inexistente"}
+_counts = {}
+_counts_lock = threading.Lock()
+
+
 def emit(evento, status=None, *, ms=None, grant=None, tamanho=None, nivel="info", ferramenta=None):
     if type(evento) is not str or evento not in EVENTS:
         return
+    count = None
+    if evento in _AGGREGATED:
+        with _counts_lock:
+            now = time.monotonic()
+            last, count = _counts.get(evento, (float("-inf"), 0))
+            count += 1
+            if now - last < 10:
+                _counts[evento] = (last, count)
+                return
+            _counts[evento] = (now, 0)
     record = dict.fromkeys(("evento", "status", "ms", "grant", "tamanho", "nivel"))
     record["evento"] = evento
+    if count is not None:
+        record["contador"] = count
     if type(status) is int and 0 <= status <= 599:
         record["status"] = status
     if type(ms) in (int, float) and 0 <= ms < 1e12:

@@ -77,7 +77,7 @@ _MIN_BLOB_SIZE = _HEADER_SIZE + NONCE_SIZE + TAG_SIZE
 _HKDF_SALT = b"batataswap/v1"
 
 AeadPurpose = Literal["conteudo", "totp"]
-MacPurpose = Literal["projeto", "conversa", "lote", "csrf", "cursor"]
+MacPurpose = Literal["projeto", "conversa", "lote", "csrf", "cursor", "access"]
 
 _AEAD_INFO: dict[str, bytes] = {
     "conteudo": b"aead-conteudo",
@@ -89,6 +89,7 @@ _MAC_INFO: dict[str, bytes] = {
     "lote": b"mac-lote",
     "csrf": b"csrf",
     "cursor": b"cursor",
+    "access": b"access",
 }
 
 _INVALID_BLOB = "dado cifrado inválido"

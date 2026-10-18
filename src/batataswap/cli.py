@@ -9,12 +9,19 @@ import sqlite3
 import subprocess
 import sys
 import time
+import unicodedata
 from contextlib import closing
 from pathlib import Path
 
 from batataswap import __version__, backup, crypto, db, logs, memory
 from batataswap.auth import oauth, owner, passwords, totp
 from batataswap.config import ConfigError, check_coherence, load_config
+
+
+def terminal_text(value: object) -> str:
+    return "".join(
+        f"\\u{ord(c):04X}" if unicodedata.category(c) in {"Cc", "Cf"} else c for c in str(value)
+    )
 
 
 class AdminError(Exception):
@@ -177,7 +184,7 @@ def main(
                 logs.emit("backup_ok", 200)
             elif command == "export":
                 print("Aviso: exportação em texto puro, sem cifra.", file=sys.stderr)
-                payload = json.dumps(memory.export_all(conn, keyring), ensure_ascii=False)
+                payload = json.dumps(memory.export_all(conn, keyring), ensure_ascii=True)
                 print(payload)
             elif command == "preferencias":
                 print("id\tdata\torigem\ttexto")
@@ -193,32 +200,36 @@ def main(
                             (item["id"],),
                         ).fetchone()[0]
                         print(
-                            f"{item['id']}\t{item['salvo_em']}\t"
-                            f"{origin} ({item['enviado_por'] or 'cli'})\t{item['texto']}"
+                            f"{terminal_text(item['id'])}\t{terminal_text(item['salvo_em'])}\t"
+                            f"{terminal_text(origin)} ({terminal_text(item['enviado_por'] or 'cli')})\t"
+                            f"{terminal_text(item['texto'])}"
                         )
                     cursor = page["proximo_cursor"]
                     if cursor is None:
                         break
             elif command == "expurgar":
                 purged = memory.purge(conn, memory.Actor(None, None, "cli"), args.id, now=now)
-                print(json.dumps(purged, ensure_ascii=False))
+                print(json.dumps(purged, ensure_ascii=True))
             elif command == "restaurar":
                 restored = memory.restore(conn, memory.Actor(None, None, "cli"), args.id, now=now)
-                print(json.dumps(restored, ensure_ascii=False))
+                print(json.dumps(restored, ensure_ascii=True))
             elif command == "lixeira":
                 print("id\ttipo\tapagado em\torigem")
                 for item in memory.list_trash(conn, memory.Actor(None, None, "cli")):
                     print(
-                        f"{item['id']}\t{item['tipo']}\t{item['apagado_em']}\t{item['origem'] or '—'}"
+                        f"{terminal_text(item['id'])}\t{terminal_text(item['tipo'])}\t"
+                        f"{terminal_text(item['apagado_em'])}\t{terminal_text(item['origem'] or '—')}"
                     )
             elif command == "grants":
-                print("rótulo\tativo\tdesde\túltimo uso")
-                for label, revoked, created, used, expires in conn.execute(
-                    "SELECT label,revoked_at,created_at,last_used_at,expires_at FROM oauth_grants"
+                print("rótulo\tativo\tdesde\túltimo uso\treusos tolerados")
+                for label, revoked, created, used, expires, tolerated in conn.execute(
+                    "SELECT g.label,g.revoked_at,g.created_at,g.last_used_at,g.expires_at,"
+                    "(SELECT count(*) FROM audit a WHERE a.grant_id=g.id "
+                    "AND a.event='refresh_reuso_tolerado') FROM oauth_grants g"
                 ):
                     print(
-                        f"{label}\t{'sim' if revoked is None and expires > now else 'não'}"
-                        f"\t{memory.iso(created)}\t{memory.iso(used) if used else '—'}"
+                        f"{terminal_text(label)}\t{'sim' if revoked is None and expires > now else 'não'}"
+                        f"\t{memory.iso(created)}\t{memory.iso(used) if used else '—'}\t{tolerated}"
                     )
             elif command == "revoke":
                 rows = conn.execute(

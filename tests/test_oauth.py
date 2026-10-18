@@ -1095,3 +1095,47 @@ def test_unknown_credentials_do_not_acquire_write_lock(env):
     finally:
         env.conn.set_trace_callback(None)
     assert not any(statement.startswith("BEGIN") for statement in statements)
+
+
+def test_refresh_tolerated_audit_once_and_uniform_errors(env):
+    tokens = claude_tokens(env)
+    refresh(env, tokens.refresh_token, NOW + 1)
+    descriptions = []
+    for token in [tokens.refresh_token, tokens.refresh_token, "bsw_rt_" + "X" * 43]:
+        with pytest.raises(oauth.OAuthError) as caught:
+            refresh(env, token, NOW + 2)
+        descriptions.append(caught.value.description)
+    assert len(set(descriptions)) == 1
+    rows = env.conn.execute(
+        "SELECT grant_id,target FROM audit WHERE event='refresh_reuso_tolerado'"
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] is not None and rows[0][1].startswith("fam_")
+    assert env.conn.execute("SELECT revoked_at FROM oauth_grants").fetchone()[0] is None
+
+
+def test_signed_access_issue_and_cached_revocation(env):
+    verifier, challenge = pkce()
+    code, _ = make_code(env, claude_params(challenge))
+    response = oauth.token_request(
+        env.conn,
+        env.config,
+        {
+            "grant_type": ["authorization_code"],
+            "code": [code],
+            "code_verifier": [verifier],
+            "client_id": [CLAUDE_CIMD_CLIENT_ID],
+            "redirect_uri": [CLAUDE_REDIRECT_URI],
+            "resource": [ORIGIN + "/mcp"],
+        },
+        NOW,
+        env.keyring,
+    )
+    token = response.access_token
+    assert "." in token
+    oauth.precheck_access(env.keyring, token, ORIGIN + "/mcp")
+    oauth.validate_bearer(env.conn, token, ORIGIN + "/mcp", "memoria", NOW)
+    oauth.check_access_active(env.conn, token, ORIGIN + "/mcp", NOW)
+    env.conn.execute("UPDATE oauth_grants SET revoked_at=?", (NOW,))
+    with pytest.raises(oauth.BearerError):
+        oauth.check_access_active(env.conn, token, ORIGIN + "/mcp", NOW)
