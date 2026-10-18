@@ -110,3 +110,4 @@ Script `bsw abrir <owner/repo>`, sem auto-swap de conta:
 - objetivo: usar o CLI nos 3 PCs sem criar pasta na mão.
 
 Antes de construir, conferir se o Claude Code já faz isso (teleport de sessão web → terminal).
+- Ampliação da ideia (Davi): um app ou extensão do CLI com um sistema de sessões que puxa do GitHub, salva as sessões e mostra no navegador o que foi feito. Ponto a checar: um app de terceiros não consegue pôr sessões na lista do claude.ai. O que dá é mostrar num site próprio ou usar o que o Claude Code já oferece nativamente (teleport/Remote Control). Pesquisar antes de planejar.
