@@ -857,3 +857,44 @@ def test_no_secret_in_logs_or_events(server, caplog):
     for value in secrets_[:-1]:
         if value != "estado-secreto-9":
             assert value not in dump
+
+
+def test_known_authorize_budget_and_unlock_direct(env, monkeypatch):  # noqa: F811
+    import asyncio
+    from urllib.parse import urlencode
+
+    from starlette.requests import Request
+
+    from batataswap.auth import owner, routes
+    from batataswap.crypto import token_hash
+
+    server = Server(env, creation_rate=CreationRate(1, 600))
+    device = "dispositivo-conhecido"
+    env.conn.execute(
+        "INSERT INTO known_devices VALUES (?, ?, ?, NULL)", (token_hash(device), NOW, NOW + 3600)
+    )
+    _, challenge = pkce()
+    query = urlencode(claude_query(challenge)).encode()
+
+    async def direct_db(deps, fn, *args, **kwargs):
+        return fn(env.conn, *args, **kwargs)
+
+    monkeypatch.setattr(routes, "_db", direct_db)
+
+    async def authorize_direct(cookie=None):
+        headers = [(b"cookie", f"{DEVICE_COOKIE}={cookie}".encode())] if cookie else []
+        request = Request({"type": "http", "query_string": query, "headers": headers})
+        return await routes._authorize(server.deps, request)
+
+    async def run():
+        assert (await authorize_direct()).status_code == 200
+        assert (await authorize_direct("falso")).status_code == 429
+        for _ in range(30):
+            assert (await authorize_direct(device)).status_code == 200
+        assert (await authorize_direct(device)).status_code == 429
+        owner.unlock(env.conn, NOW + 1)
+        assert (await authorize_direct()).status_code == 200
+        assert (await authorize_direct(device)).status_code == 200
+        assert (await authorize_direct()).status_code == 429
+
+    asyncio.run(run())

@@ -191,7 +191,7 @@ def test_truncation_cursor_and_thread(connected, monkeypatch):
 
     monkeypatch.setattr(memory, "add_preference", checked)
     deps = app.state.oauth_deps
-    deps.config = replace(deps.config, limits=replace(deps.config.limits, tool_response_chars=4000))
+    deps.config = replace(deps.config, limits=replace(deps.config.limits, tool_response_chars=6000))
 
     async def run():
         token = request_actor.set(actor)
@@ -208,7 +208,7 @@ def test_truncation_cursor_and_thread(connected, monkeypatch):
                 if cursor:
                     args["cursor"] = cursor
                 response = await call("buscar_contexto", args)
-                assert response_size(response) <= 4000
+                assert response_size(response) <= 6000
                 data = saved(response)
                 ids.extend(item["id"] for item in data["registros"])
                 cursor = data["proximo_cursor"]
@@ -269,7 +269,7 @@ def test_large_conversation_pages_without_loss(connected):
                 if cursor:
                     args["cursor"] = cursor
                 response = await call("ler_conversa", args)
-                assert response_size(response) <= 100_000
+                assert response_size(response) <= 140_000
                 page = saved(response)
                 seqs.extend(item["seq"] for item in page["registros"])
                 cursor = page["proximo_cursor"]
@@ -453,7 +453,7 @@ def test_versions_batches_and_backslash_context(connected):
             for version, summary in ((1, large["resumo"]), (2, CONTEXT["resumo"])):
                 response = await call("buscar_contexto", {"projeto": "Projeto", "versao": version})
                 assert saved(response)["registros"][0]["resumo"] == summary
-                assert response_size(response) <= 100000
+                assert response_size(response) <= 140000
             assert (await call("buscar_contexto", {"projeto": "Projeto", "versao": 3})).is_error
             args = {
                 "conversa": "C",
@@ -519,3 +519,38 @@ def test_delete_confirmation_and_trash(connected, env, prefix):
             request_actor.reset(token)
 
     asyncio.run(run())
+
+
+def test_large_conversation_serialized_pages(connected, env):
+    from batataswap import conversations
+    from batataswap.tools import _execute
+
+    app, _, actor = connected
+    conversations.append_messages(
+        env.conn,
+        env.keyring,
+        env.config.limits,
+        actor,
+        "longa",
+        [{"autor": "claude", "texto": "x" * 4000}] * 40,
+        now=NOW,
+    )
+    args = {"conversa": "longa", "ultimas": 40}
+    seen = []
+    while True:
+        response = _execute(env.conn, app.state.oauth_deps, actor, "ler_conversa", args, NOW)
+        serialized = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": response.model_dump(by_alias=True, exclude_none=True),
+            },
+            ensure_ascii=False,
+        )
+        assert len(serialized.encode()) < 140000
+        data = response.structured_content
+        seen.extend(item["seq"] for item in data["registros"])
+        if not data["proximo_cursor"]:
+            break
+        args = {**args, "cursor": data["proximo_cursor"]}
+    assert sorted(seen) == list(range(1, 41))

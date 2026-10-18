@@ -152,6 +152,8 @@ def test_serve_options(env, monkeypatch):
             "access_log": False,
             "limit_concurrency": 64,
             "timeout_keep_alive": 5,
+            "timeout_graceful_shutdown": 15,
+            "h11_max_incomplete_event_size": 16384,
         }
     ]
 

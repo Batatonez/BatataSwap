@@ -974,3 +974,31 @@ def test_integracao_com_starlette_de_verdade():
     assert call(edge, "GET", "/saude/").status == 404  # a borda não deixa o redirect de barra
     assert call(edge, "POST", "/mcp", [bearer()]).status == 200
     assert call(edge, "GET", "/mcp", [bearer()]).status == 405
+
+
+@pytest.mark.parametrize("slow", [False, True])
+def test_body_deadlines(slow):
+    edge, toy = make()
+    edge.body_total_timeout = 0.08
+    edge.body_idle_timeout = 0.04
+
+    async def run():
+        sent = []
+
+        async def receive():
+            if slow:
+                await asyncio.sleep(0.01)
+                return {"type": "http.request", "body": b"x", "more_body": True}
+            await asyncio.Event().wait()
+
+        async def send(message):
+            sent.append(message)
+
+        await edge._forward(
+            {}, receive, send, RoutePolicy.default().for_path("/saude")[0], 10000, None
+        )
+        assert sent[0]["status"] == 408
+        assert (b"connection", b"close") in sent[0]["headers"]
+        assert toy.calls == 0
+
+    asyncio.run(run())

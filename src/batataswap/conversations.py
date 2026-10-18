@@ -136,6 +136,8 @@ def append_messages(
             f"O lote passou de {limits.message_batch_bytes // 1024} KiB. "
             f"Cabem {fit} mensagens por chamada. Nada foi gravado; mande lotes menores."
         )
+    if lote is not None:
+        lote = keyring.mac("lote", b"chave:" + lote.encode("utf-8")).hex()
     payload_mac = keyring.mac("lote", canonical)
     sizes = [len(m["texto"].encode("utf-8")) for m in messages]
     total_size = sum(sizes)

@@ -309,6 +309,7 @@ def test_load_master_key_ok(tmp_path):
 
 def test_load_master_key_pela_variavel(tmp_path, monkeypatch):
     _write_key(tmp_path, MASTER)
+    (tmp_path / "batataswap-master").chmod(0o400)
     monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
     assert load_master_key() == MASTER
 
@@ -528,7 +529,11 @@ def test_import_rejeita_base32_nao_canonico():
     "from_environment,uid,gid,mode,allowed",
     [
         (True, 0, 0, 0o440, True),
-        (True, 0, 0, 0o640, True),
+        (True, 0, 0, 0o400, True),
+        (True, 0, 0, 0o640, False),
+        (True, 0, 0, 0o600, False),
+        (True, 0, 0, 0o540, False),
+        (True, 0, 0, 0o1440, False),
         (False, 0, 0, 0o440, False),
         (True, 0, 123, 0o440, False),
         (True, 123, 0, 0o440, False),

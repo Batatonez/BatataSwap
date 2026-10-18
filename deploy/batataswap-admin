@@ -8,7 +8,7 @@ case "${1:-}" in
     key-init|key-import)
         echo "rode como root diretamente: sudo /opt/batataswap/.venv/bin/python -m batataswap $1" >&2
         exit 2 ;;
-    serve|init|migrate|key-export|backup|restore-test|export|grants|revoke|unlock|cleanup) ;;
+    serve|init|migrate|key-export|backup|restore-test|export|lixeira|restaurar|grants|revoke|unlock|cleanup) ;;
     restore|wipe)
         # list-units inclui units transitórias carregadas e timers ativando.
         units=$(systemctl list-units --all --no-legend --plain \

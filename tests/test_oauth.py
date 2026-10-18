@@ -969,3 +969,63 @@ def test_audit_has_no_secrets(env):
     assert {r[0] for r in rows} <= oauth.AUDIT_EVENTS
     for _, _, target in rows:
         assert target is None or target.startswith("grant_")
+
+
+def test_refresh_rotation_hourly_limit(env):
+    tokens = claude_tokens(env)
+    original = tokens.refresh_token
+    for _ in range(120):
+        tokens = refresh(env, tokens.refresh_token, NOW + 1)
+    before = env.conn.execute("SELECT count(*) FROM oauth_tokens").fetchone()[0]
+    with pytest.raises(oauth.OAuthError, match="temporarily_unavailable") as caught:
+        refresh(env, tokens.refresh_token, NOW + 1)
+    assert caught.value.status == 429
+    assert "120 rotações" in caught.value.description
+    assert env.conn.execute("SELECT count(*) FROM oauth_tokens").fetchone()[0] == before
+    oauth.cleanup_expired(env.conn, NOW + 3602)
+    tokens = refresh(env, tokens.refresh_token, NOW + 3602)
+    # Limite não perde a detecção de reuso de um refresh antigo.
+    with pytest.raises(oauth.OAuthError):
+        refresh(env, original, NOW + 3603)
+    with pytest.raises(oauth.OAuthError):
+        refresh(env, tokens.refresh_token, NOW + 3604)
+
+
+def test_cleanup_audit_and_confirmations(env):
+    tokens = claude_tokens(env)
+    refresh(env, tokens.refresh_token, NOW + 1)
+    grant = env.conn.execute("SELECT id FROM oauth_grants").fetchone()[0]
+    env.conn.execute("INSERT INTO audit(at,event) VALUES (?, 'antigo')", (NOW - 3 * 86400,))
+    for i, (expires, used) in enumerate([(NOW, None), (NOW + 200, NOW), (NOW + 200, None)]):
+        env.conn.execute(
+            "INSERT INTO pending_deletions VALUES (?, ?, ?, ?, ?)",
+            (bytes([i]), "pref_x", grant, expires, used),
+        )
+    oauth.cleanup_expired(env.conn, NOW + 2, audit_retention_days=2)
+    assert not env.conn.execute("SELECT 1 FROM audit WHERE event='antigo'").fetchone()
+    assert env.conn.execute("SELECT count(*) FROM pending_deletions").fetchone()[0] == 1
+    assert (
+        env.conn.execute("SELECT count(*) FROM oauth_tokens WHERE kind='refresh'").fetchone()[0]
+        == 2
+    )
+
+
+def test_known_transaction_isolation(env):
+    _, challenge = pkce()
+    req = oauth.validate_authorize(
+        env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW
+    )
+    known = oauth.create_transaction(env.conn, env.keyring, req, None, NOW, 2, "device:known")
+    for _ in range(10):
+        oauth.create_transaction(env.conn, env.keyring, req, None, NOW, 2)
+    from batataswap.crypto import token_hash
+
+    assert env.conn.execute(
+        "SELECT 1 FROM oauth_transactions WHERE id_hash=?", (token_hash(known.tx_id),)
+    ).fetchone()
+    assert (
+        env.conn.execute(
+            "SELECT count(*) FROM oauth_transactions WHERE device_key IS NULL"
+        ).fetchone()[0]
+        == 2
+    )

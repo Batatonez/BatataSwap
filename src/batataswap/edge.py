@@ -20,6 +20,7 @@ Nada aqui loga. Quem quiser registrar eventos passa ``on_event(evento, status)``
 de evento são fixos (``EVENTS``) e nunca carregam valor vindo da requisição.
 """
 
+import asyncio
 import contextlib
 import json
 import re
@@ -42,6 +43,7 @@ SESSION_COOKIE = "__Host-bsw_sess"
 EVENTS = frozenset(
     {
         "websocket_recusado",
+        "corpo_timeout",
         "host_duplicado",
         "host_invalido",
         "caminho_invalido",
@@ -224,6 +226,7 @@ _ERRORS = {
     403: _json("Acesso negado."),
     404: _json("Não encontrado."),
     405: _json("Método não permitido."),
+    408: _json("Prazo de leitura do corpo excedido."),
     413: _json("Corpo da requisição grande demais."),
     421: _json("Host não reconhecido."),
     500: _json("Erro interno."),
@@ -238,10 +241,14 @@ class EdgeMiddleware:
         config: Config,
         routes: RoutePolicy,
         on_event: Callable[[str, int], None] | None = None,
+        body_total_timeout: float = 10,
+        body_idle_timeout: float = 5,
     ):
         if not isinstance(config, Config) or not isinstance(routes, RoutePolicy):
             raise TypeError("EdgeMiddleware: config e routes são obrigatórios.")
         self.app = app
+        self.body_total_timeout = body_total_timeout
+        self.body_idle_timeout = body_idle_timeout
         self.config = config
         self.routes = routes
         self.on_event = on_event
@@ -486,8 +493,23 @@ class EdgeMiddleware:
         # handler nem roda, então nenhum efeito dele acontece. Os tetos são pequenos (≤ 256 KiB).
         chunks: list[bytes] = []
         received = 0
+        deadline = asyncio.get_running_loop().time() + self.body_total_timeout
         while True:
-            message = await receive()
+            try:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise TimeoutError
+                async with asyncio.timeout(min(remaining, self.body_idle_timeout)):
+                    message = await receive()
+            except TimeoutError:
+                return await self._send_error(
+                    send,
+                    408,
+                    "corpo_timeout",
+                    cors=rule.cors,
+                    cors_origin=cors_origin,
+                    extra=((b"connection", b"close"),),
+                )
             if message.get("type") != "http.request":
                 return  # cliente desconectou no meio do corpo: não há a quem responder
             body = message.get("body", b"")

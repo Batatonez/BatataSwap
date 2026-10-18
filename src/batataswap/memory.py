@@ -916,6 +916,19 @@ def request_delete(
         row = _find(conn, table, public_id)
         if not row or row[1] is not None or row[2] is not None:
             raise NotFound("Registro não encontrado ou já apagado.")
+        pending = conn.execute(
+            "SELECT count(*) FROM pending_deletions WHERE grant_id=? "
+            "AND expires_at>? AND used_at IS NULL",
+            (actor.grant_id, now),
+        ).fetchone()[0]
+        hourly = conn.execute(
+            "SELECT count(*) FROM audit WHERE event='apagar_pedido' AND grant_id=? AND at>?",
+            (actor.grant_id, now - 3600),
+        ).fetchone()[0]
+        if pending >= 20 or hourly >= 60:
+            raise LimitExceeded(
+                "Limite de pedidos de apagar: 20 pendentes e 60 por hora por grant."
+            )
         code = secrets.token_urlsafe(9)
         conn.execute("DELETE FROM pending_deletions WHERE expires_at < ?", (now,))
         conn.execute(
@@ -1027,18 +1040,51 @@ def _live_parent_error(conn: sqlite3.Connection, table: str, row_id: int) -> Non
         raise TrashError(f"Restaure o {parent[2]} primeiro.")
 
 
+def list_trash(conn: sqlite3.Connection, actor: Actor) -> list[dict[str, Any]]:
+    """Metadados administrativos da lixeira, sem nomes nem conteúdo."""
+    _require_local_admin(actor)
+    sources = {
+        "projects": "(SELECT coalesce(g.public_id,c.source_label) FROM contexts c "
+        "LEFT JOIN oauth_grants g ON g.id=c.grant_id WHERE c.project_id=t.id "
+        "ORDER BY c.id DESC LIMIT 1)",
+        "contexts": "coalesce((SELECT public_id FROM oauth_grants WHERE id=t.grant_id),t.source_label)",
+        "preferences": "coalesce((SELECT public_id FROM oauth_grants WHERE id=t.grant_id),t.source_label)",
+        "conversations": "(SELECT g.public_id FROM message_batches b JOIN oauth_grants g "
+        "ON g.id=b.grant_id WHERE b.conversation_id=t.id ORDER BY b.id DESC LIMIT 1)",
+        "messages": "(SELECT g.public_id FROM message_batches b JOIN oauth_grants g "
+        "ON g.id=b.grant_id WHERE b.id=t.batch_id)",
+    }
+    items = []
+    for table, source in sources.items():
+        for public_id, deleted, origin in conn.execute(
+            f"SELECT t.public_id,t.trashed_at,{source} FROM {table} t "
+            "WHERE t.trashed_at IS NOT NULL AND t.purged_at IS NULL ORDER BY t.id"
+        ):
+            items.append(
+                {
+                    "id": public_id,
+                    "tipo": _parse_id(public_id)[1],
+                    "apagado_em": iso(deleted),
+                    "origem": origin,
+                }
+            )
+    return items
+
+
 def restore(conn: sqlite3.Connection, actor: Actor, public_id: str, *, now: int) -> dict[str, Any]:
     """Restaura o item e só o que foi para a lixeira junto com ele (mesmo ``trash_root``)."""
     _require_local_admin(actor)
     table, kind = _parse_id(public_id)
     with write_transaction(conn):
         row = conn.execute(
-            f"SELECT id, trash_root, purged_at FROM {table} "
+            f"SELECT id, trash_root, purged_at, trashed_at FROM {table} "
             "WHERE public_id = ? AND trashed_at IS NOT NULL",
             (public_id,),
         ).fetchone()
         if not row or row[2] is not None:
             raise NotFound("Registro não encontrado na lixeira.")
+        if row[3] <= now - TRASH_RETENTION_SECONDS:
+            raise TrashError("O prazo de restauração de 30 dias expirou.")
         _live_parent_error(conn, table, row[0])
         count = 0
         for tbl in _ALL_TABLES:

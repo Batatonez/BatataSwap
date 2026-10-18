@@ -317,3 +317,17 @@ def test_concurrent_last_daily_write(conn, keyring, a1):
     res = run_threads(conn, 5, lambda c, i: append(c, keyring, lim, a1, msgs(("claude", "x"))))
     assert sum(1 for k, _ in res if k == "ok") == 1
     assert all(isinstance(v, memory.LimitExceeded) for k, v in res if k == "err")
+
+
+def test_batch_key_only_hmac_on_disk(conn, keyring, limits, a1):
+    secret = "CHAVE-PRIVADA-IDEMPOTENCIA-987654321"
+    append(conn, keyring, limits, a1, msgs(("claude", "oi")), lote=secret)
+    expected = keyring.mac("lote", b"chave:" + secret.encode()).hex()
+    assert conn.execute("SELECT client_batch_key FROM message_batches").fetchone() == (expected,)
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    path = conn.execute("PRAGMA database_list").fetchone()[2]
+    from pathlib import Path
+
+    assert secret.encode() not in Path(path).read_bytes()
+    again = append(conn, keyring, limits, a1, msgs(("claude", "oi")), lote=secret)
+    assert again["first_seq"] == 1

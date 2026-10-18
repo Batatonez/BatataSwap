@@ -166,9 +166,14 @@ def _check_key_file(st: os.stat_result, path: Path, *, from_environment: bool = 
         raise CryptoError(f"a chave mestra precisa ter exatamente {MASTER_KEY_SIZE} bytes: {path}")
     if os.name == "posix":
         systemd_root = (
-            from_environment and st.st_uid == 0 and st.st_gid == 0 and not st.st_mode & 0o007
+            from_environment
+            and st.st_uid == 0
+            and st.st_gid == 0
+            and stat.S_IMODE(st.st_mode) in (0o400, 0o440)
         )
-        if st.st_mode & 0o077 and not systemd_root:
+        if (from_environment and st.st_uid == 0 and st.st_gid == 0 and not systemd_root) or (
+            st.st_mode & 0o077 and not systemd_root
+        ):
             raise CryptoError(
                 f"a chave mestra não pode ser acessível por grupo ou outros (use 0400): {path}"
             )

@@ -288,3 +288,50 @@ def test_wipe_real_data(env, tmp_path, monkeypatch, capsys):  # noqa: F811
         assert conn.execute(
             "SELECT count(*) FROM oauth_tokens WHERE revoked_at IS NULL"
         ).fetchone() == (0,)
+
+
+def test_trash_restore_cascade_cli(setup_cli, capsys):
+    from batataswap import conversations
+    from tests.test_memory import _grant, _trash, save
+
+    config = setup_cli
+    conn = db.connect(config.data_dir / "batataswap.db")
+    conn.execute("INSERT INTO oauth_clients VALUES (1,'client','static','{}',0,0)")
+    actor = _grant(conn, "grant_aaaaaaaaaaaaaaaa", "conta-1")
+    keyring = crypto.Keyring(crypto.load_master_key())
+    now = int(cli.time.time())
+    save(conn, keyring, config.limits, actor, projeto="NOME-SECRETO", now=now)
+    conversations.append_messages(
+        conn,
+        keyring,
+        config.limits,
+        actor,
+        "FIO-SECRETO",
+        [{"autor": "claude", "texto": "CONTEUDO-SECRETO"}],
+        projeto="NOME-SECRETO",
+        now=now,
+    )
+    project = conn.execute("SELECT public_id FROM projects").fetchone()[0]
+    context = conn.execute("SELECT public_id FROM contexts").fetchone()[0]
+    # Filho apagado antes não é restaurado pela operação do pai.
+    _trash(conn, keyring, actor, context, now=now - 1)
+    _trash(conn, keyring, actor, project, now=now)
+    capsys.readouterr()
+    assert cli.main(["lixeira"], config=config) == 0
+    output = capsys.readouterr().out
+    assert project in output and context in output
+    assert actor.grant_public_id in output
+    assert all(
+        secret not in output for secret in ["NOME-SECRETO", "FIO-SECRETO", "CONTEUDO-SECRETO"]
+    )
+    assert cli.main(["restaurar", project], config=config) == 0
+    for table in ["projects", "conversations", "messages"]:
+        assert conn.execute(f"SELECT trashed_at FROM {table}").fetchone() == (None,)
+    assert conn.execute("SELECT trashed_at FROM contexts").fetchone() == (now - 1,)
+    assert cli.main(["restaurar", context], config=config) == 0
+    assert conn.execute("SELECT trashed_at FROM contexts").fetchone() == (None,)
+    assert conn.execute("SELECT grant_id FROM audit WHERE event='restaurar'").fetchall() == [
+        (None,),
+        (None,),
+    ]
+    conn.close()

@@ -134,6 +134,8 @@ def test_admin_allowlist(tmp_path):
         "export",
         "wipe",
         "grants",
+        "lixeira",
+        "restaurar",
         "revoke",
         "unlock",
         "cleanup",

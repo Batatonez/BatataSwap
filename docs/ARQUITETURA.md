@@ -579,7 +579,7 @@ Se o bloco pedir algo assim, avise o usuário.
 | bytes gravados por dia | 4 MiB |
 | **total guardado (vivo + lixeira)** | **200 MiB**; acima disso, escrita recusada com aviso pra exportar e limpar |
 | dados operacionais | transações pendentes ≤ 20; tokens, códigos e transações vencidos apagados a cada hora; `audit` guardado por 180 dias; banco inteiro (com operacional) ≤ 300 MiB |
-| resposta de ferramenta | 100 mil caracteres somando `content` + `structuredContent`; corta **por item inteiro**, JSON sempre válido, com `"truncado": true` e `proximo_cursor` |
+| resposta de ferramenta | 140 mil caracteres somando `content` + `structuredContent` serializados (o Claude aceita ~150 mil); corta **por item inteiro**, JSON sempre válido, com `"truncado": true` e `proximo_cursor` |
 | `buscar` | lê em blocos de 500 linhas (decifra, procura, descarta), para em 20 resultados ou **2 s** e avisa "busca parcial"; roda em thread, fora do event loop |
 
 - Estourou um limite → erro claro, sem gravar nada.

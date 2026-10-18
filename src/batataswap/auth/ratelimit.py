@@ -100,6 +100,12 @@ class CreationRate:
         self._events = deque()
         self._lock = threading.Lock()
 
+    def apply_unlock(self, timestamp):
+        with self._lock:
+            if timestamp > getattr(self, "_last_unlock", float("-inf")):
+                self._events.clear()
+                self._last_unlock = timestamp
+
     def _prune(self, now):
         while self._events and self._events[0] <= now - self.window:
             self._events.popleft()

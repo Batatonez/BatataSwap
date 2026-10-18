@@ -68,7 +68,7 @@ class Limits:
     operational_cleanup_seconds: int = 3600
     audit_retention_days: int = 180
     database_bytes: int = 300 * 1024**2
-    tool_response_chars: int = 100_000
+    tool_response_chars: int = 140_000
     search_block_rows: int = 500
     search_results: int = 20
     search_seconds: int = 2

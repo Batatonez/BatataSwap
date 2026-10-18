@@ -22,7 +22,7 @@ from starlette.routing import Route
 from batataswap.config import Config
 from batataswap.crypto import Keyring
 
-from . import oauth, pages
+from . import oauth, owner, pages
 from .cimd import Fetcher, httpx_fetcher
 from .owner import check_login
 from .ratelimit import Budget, CreationRate, ScryptSlot
@@ -59,6 +59,7 @@ class OAuthDeps:
     budget: Budget
     slot: ScryptSlot
     fetcher: Fetcher = httpx_fetcher
+    device_creation_rates: dict = field(default_factory=dict)
     creation_rate: CreationRate = field(default_factory=lambda: CreationRate(30, 600))
     clock: Callable[[], float] = time.time
     on_event: Callable[[str, int], None] | None = None
@@ -131,10 +132,35 @@ def _json(data: dict) -> JSONResponse:
 
 
 async def _authorize(deps: OAuthDeps, request: Request) -> Response:
-    # Orçamento da etapa anônima antes de qualquer banco ou rede (§4.2).
-    if not deps.creation_rate.allow():
+    now = deps.clock()
+
+    def creation_budget(conn):
+        key = owner._budget_key(conn, request.cookies.get(DEVICE_COOKIE), now)
+        devices = {
+            "device:" + r[0].hex()
+            for r in conn.execute(
+                "SELECT token_hash FROM known_devices WHERE expires_at>? AND revoked_at IS NULL",
+                (now,),
+            )
+        }
+        marker = conn.execute("SELECT value FROM meta WHERE key='unlock_requested_at'").fetchone()
+        return key, devices, float(marker[0]) if marker else None
+
+    device_key, devices, marker = await _db(deps, creation_budget)
+    for stale in set(deps.device_creation_rates) - devices:
+        deps.device_creation_rates.pop(stale, None)
+    rate = (
+        deps.creation_rate
+        if device_key == "global"
+        else deps.device_creation_rates.setdefault(device_key, CreationRate(30, 600))
+    )
+    if marker is not None:
+        deps.creation_rate.apply_unlock(marker)
+        for device_rate in deps.device_creation_rates.values():
+            device_rate.apply_unlock(marker)
+    if not rate.allow():
         deps.emit("authorize_limite", 429)
-        retry = max(1, deps.creation_rate.check())
+        retry = max(1, rate.check())
         return _html(
             pages.message_page(
                 "Tente de novo em alguns minutos",
@@ -165,6 +191,7 @@ async def _authorize(deps: OAuthDeps, request: Request) -> Response:
         request.cookies.get(TX_COOKIE),
         now,
         deps.config.limits.pending_transactions,
+        None if device_key == "global" else device_key,
     )
     deps.emit("transacao_criada", 200)
     host = urlsplit(req.redirect_uri).hostname or ""

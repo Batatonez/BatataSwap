@@ -133,7 +133,7 @@ def test_migration_rollback_and_invalid_name(database, tmp_path, monkeypatch):
     for entry in original.iterdir():
         if entry.name.endswith(".sql"):
             (directory / entry.name).write_bytes(entry.read_bytes())
-    failing = directory / "0003_failure.sql"
+    failing = directory / "0004_failure.sql"
     failing.write_text("CREATE TABLE temporary_table(id INTEGER) STRICT; INVALID SQL;")
     monkeypatch.setattr(db.resources, "files", lambda package: directory)
     with pytest.raises(DatabaseError):
@@ -141,7 +141,7 @@ def test_migration_rollback_and_invalid_name(database, tmp_path, monkeypatch):
     assert not conn.execute(
         "SELECT 1 FROM sqlite_schema WHERE name = ?", ("temporary_table",)
     ).fetchone()
-    assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 2
+    assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 3
     (directory / "invalid.sql").write_text("SELECT 1;")
     with pytest.raises(DatabaseError, match="Nome de migração inválido"):
         migrate(conn)
@@ -303,3 +303,41 @@ def test_migration_hash_order_duplicates(database, tmp_path, monkeypatch):
         assert fresh.execute("SELECT version FROM schema_migrations").fetchall() == [(2,)]
     finally:
         fresh.close()
+
+
+def test_security_migration_discards_legacy_batch_keys(tmp_path, monkeypatch):
+    from batataswap import db
+
+    original_files = db.resources.files
+    source = original_files("batataswap.migrations")
+    old = tmp_path / "old_migrations"
+    old.mkdir()
+    for entry in source.iterdir():
+        if entry.name.endswith(".sql") and entry.name[:4] in {"0001", "0002"}:
+            (old / entry.name).write_bytes(entry.read_bytes())
+    monkeypatch.setattr(db.resources, "files", lambda package: old)
+    path = tmp_path / "private" / "legacy.db"
+    conn = connect(path, create=True)
+    try:
+        migrate(conn)
+        conn.execute("INSERT INTO oauth_clients VALUES (1,'c','static','{}',0,0)")
+        conn.execute(
+            "INSERT INTO oauth_grants(id,public_id,client_row_id,label,resource,scope,created_at,expires_at) VALUES (1,'grant_x',1,'conta-1','r','s',0,9999999999)"
+        )
+        conn.execute(
+            "INSERT INTO conversations(id,public_id,name_mac,name_ct,created_at,updated_at) VALUES (1,'conv_x',X'01',X'02',0,0)"
+        )
+        conn.execute(
+            "INSERT INTO message_batches VALUES (1,'lote_x',1,1,0,'CHAVE-ANTIGA-SECRETA',X'01',1,1)"
+        )
+        conn.execute(
+            "INSERT INTO messages(id,public_id,conversation_id,batch_id,seq,claimed_author,created_at,text_ct,text_size) VALUES (1,'msg_x',1,1,1,'claude',0,X'02',1)"
+        )
+        monkeypatch.setattr(db.resources, "files", original_files)
+        migrate(conn)
+        assert conn.execute("SELECT client_batch_key FROM message_batches").fetchone() == (None,)
+        assert conn.execute("SELECT count(*) FROM messages").fetchone() == (1,)
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        assert b"CHAVE-ANTIGA-SECRETA" not in path.read_bytes()
+    finally:
+        conn.close()

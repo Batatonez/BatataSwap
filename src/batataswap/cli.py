@@ -52,6 +52,7 @@ def main(
         "backup",
         "restore-test",
         "grants",
+        "lixeira",
         "unlock",
         "cleanup",
     ):
@@ -60,6 +61,7 @@ def main(
     key_parser.add_argument("--substituir", action="store_true")
     key_parser.add_argument("--banco-sera-perdido", action="store_true")
     commands.add_parser("restore").add_argument("arquivo", type=Path)
+    commands.add_parser("restaurar").add_argument("id")
     commands.add_parser("revoke").add_argument("rotulo")
     commands.add_parser("export").add_argument("--out", required=True)
     commands.add_parser("wipe").add_argument("--incluir-backups", action="store_true")
@@ -169,6 +171,15 @@ def main(
                 print("Aviso: exportação em texto puro, sem cifra.", file=sys.stderr)
                 payload = json.dumps(memory.export_all(conn, keyring), ensure_ascii=False)
                 print(payload)
+            elif command == "restaurar":
+                restored = memory.restore(conn, memory.Actor(None, None, "cli"), args.id, now=now)
+                print(json.dumps(restored, ensure_ascii=False))
+            elif command == "lixeira":
+                print("id\ttipo\tapagado em\torigem")
+                for item in memory.list_trash(conn, memory.Actor(None, None, "cli")):
+                    print(
+                        f"{item['id']}\t{item['tipo']}\t{item['apagado_em']}\t{item['origem'] or '—'}"
+                    )
             elif command == "grants":
                 print("rótulo\tativo\tdesde\túltimo uso")
                 for label, revoked, created, used, expires in conn.execute(
@@ -191,7 +202,7 @@ def main(
             elif command == "unlock":
                 owner.unlock(conn, now)
             elif command == "cleanup":
-                oauth.cleanup_expired(conn, now)
+                oauth.cleanup_expired(conn, now, config.limits.audit_retention_days)
                 memory.sweep_trash(conn, now=now)
                 memory.retry_checkpoint(conn, now=now)
                 owner.cleanup_known_devices(conn, now)

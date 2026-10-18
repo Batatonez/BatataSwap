@@ -331,3 +331,21 @@ Exportação privada para arquivo:
 ```bash
 (umask 077; sudo batataswap-admin export --out - > ~/memoria.json)
 ```
+
+### Credencial cifrada e TPM
+
+Sem TPM, quem copia o disco inteiro pode obter também o `credential.secret` do systemd
+e abrir a credencial cifrada. A cifra nesse modo não protege contra cópia integral do disco.
+Execute `systemd-creds has-tpm2` para consultar a disponibilidade e o modo de suporte TPM2;
+confira também a saída de `systemd-creds encrypt` ao provisionar a credencial.
+
+### Lixeira e restauração de memória
+
+Use `sudo batataswap-admin lixeira` para listar id, tipo, data de apagado e origem,
+sem nomes nem conteúdo. Use `sudo batataswap-admin restaurar <id>` para restaurar
+um registro e os filhos apagados junto com ele, durante os 30 dias de retenção.
+Ambos usam `--pipe`. Este comando é diferente de `restore`, que recupera um backup.
+
+A migração 0003 invalida as chaves antigas de idempotência de lotes, pois a migração
+SQL não tem acesso à chave mestra para convertê-las em HMAC. Mensagens são preservadas;
+um reenvio de lote antigo após migrar pode duplicá-las. Novas chaves ficam somente como HMAC.

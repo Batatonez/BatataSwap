@@ -395,6 +395,7 @@ def create_transaction(
     browser: str | None,
     now: float,
     max_pending: int,
+    device_key: str | None = None,
 ) -> NewTransaction:
     """§4.2 passo 3: grava a transação (10 min) e descarta as pendentes mais antigas."""
     now = int(now)
@@ -407,12 +408,12 @@ def create_transaction(
         )
         conn.execute(
             "DELETE FROM oauth_transactions WHERE rowid IN (SELECT rowid FROM oauth_transactions "
-            "ORDER BY expires_at DESC, rowid DESC LIMIT -1 OFFSET ?)",
-            (max_pending - 1,),
+            "WHERE device_key IS ? ORDER BY expires_at DESC, rowid DESC LIMIT -1 OFFSET ?)",
+            (device_key, max_pending - 1),
         )
         conn.execute(
             "INSERT INTO oauth_transactions(id_hash,browser_hash,client_row_id,redirect_uri,"
-            "resource,scope,code_challenge,state,expires_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            "resource,scope,code_challenge,state,expires_at,device_key) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 token_hash(tx_id),
                 token_hash(browser),
@@ -423,6 +424,7 @@ def create_transaction(
                 req.code_challenge,
                 req.state,
                 now + TX_TTL,
+                device_key,
             ),
         )
     return NewTransaction(tx_id, browser, csrf_token(keyring, tx_id))
@@ -868,6 +870,15 @@ def _refresh(conn, config: Config, params, now: int) -> TokenResponse:
                 if parsed is None or not set(parsed.split(" ")) <= granted:
                     raise _err("invalid_scope", "scope maior que o concedido")
                 scope_out = parsed
+            rotations = conn.execute(
+                "SELECT count(*) FROM oauth_tokens WHERE family_id=? AND kind='refresh' "
+                "AND used_at>?",
+                (family_id, now - 3600),
+            ).fetchone()[0]
+            if rotations >= 120:
+                raise _err(
+                    "temporarily_unavailable", "Limite de 120 rotações por hora por família.", 429
+                )
             if (
                 conn.execute(
                     "UPDATE oauth_tokens SET used_at=? WHERE token_hash=? AND used_at IS NULL",
@@ -1013,7 +1024,9 @@ def validate_bearer(
 # ---------------------------------------------------------------------------
 
 
-def cleanup_expired(conn: sqlite3.Connection, now: float) -> dict[str, int]:
+def cleanup_expired(
+    conn: sqlite3.Connection, now: float, audit_retention_days: int = 180
+) -> dict[str, int]:
     """Apaga transações, códigos e tokens vencidos.
 
     Refresh usado fica até a família inteira vencer (precisa dele para detectar reuso, §4.3).
@@ -1022,6 +1035,10 @@ def cleanup_expired(conn: sqlite3.Connection, now: float) -> dict[str, int]:
     now = int(now)
     with write_transaction(conn):
         _revoke_expired_grants(conn, now)
+        conn.execute("DELETE FROM audit WHERE at<?", (now - audit_retention_days * 86400,))
+        conn.execute(
+            "DELETE FROM pending_deletions WHERE expires_at<=? OR used_at IS NOT NULL", (now,)
+        )
         counts = {
             "transacoes": conn.execute(
                 "DELETE FROM oauth_transactions WHERE expires_at<=?", (now,)

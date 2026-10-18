@@ -31,6 +31,7 @@ EVENTS = frozenset(
         "token_revogado",
         "caminho_invalido",
         "corpo_grande",
+        "corpo_timeout",
         "credencial_ausente",
         "erro_interno",
         "host_duplicado",

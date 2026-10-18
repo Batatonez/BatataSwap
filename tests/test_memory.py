@@ -656,3 +656,24 @@ def test_concurrent_delete_code_consumed_once(conn, keyring, limits, a1):
     )
     assert sum(1 for k, _ in res if k == "ok") == 1
     assert all(isinstance(v, memory.InvalidConfirmation) for k, v in res if k == "err")
+
+
+def test_deletion_operational_limits(conn, keyring, limits, a1, a2):
+    item = memory.add_preference(conn, keyring, limits, a1, "teste", now=T0)
+    for _ in range(20):
+        memory.request_delete(conn, keyring, a1, item["id"], now=T0)
+    with pytest.raises(memory.LimitExceeded, match="20 pendentes"):
+        memory.request_delete(conn, keyring, a1, item["id"], now=T0)
+    memory.request_delete(conn, keyring, a2, item["id"], now=T0)
+    for i in range(40):
+        memory.request_delete(conn, keyring, a1, item["id"], now=T0 + 301 * (1 + i // 20))
+    with pytest.raises(memory.LimitExceeded, match="60 por hora"):
+        memory.request_delete(conn, keyring, a1, item["id"], now=T0 + 903)
+    memory.request_delete(conn, keyring, a1, item["id"], now=T0 + 3601)
+
+
+def test_restore_retention_enforced(conn, keyring, limits, a1):
+    item = memory.add_preference(conn, keyring, limits, a1, "teste", now=T0)
+    _trash(conn, keyring, a1, item["id"])
+    with pytest.raises(memory.TrashError, match="30 dias"):
+        memory.restore(conn, CLI, item["id"], now=T0 + memory.TRASH_RETENTION_SECONDS)

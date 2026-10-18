@@ -35,7 +35,9 @@ def _grant_atual():
 def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_routes=()):
     """Cria ASGI sem iniciar rede. extra_routes precedem as reservas dos painéis futuros."""
 
-    if config.limits.context_bytes * 3 + 1600 > config.limits.tool_response_chars:
+    # Pior caso de escape: cada byte "\" vira 2 caracteres em content e 2 em structuredContent,
+    # então o contexto ocupa 4x context_bytes na resposta; 1600 cobre o resto do envelope.
+    if config.limits.context_bytes * 4 + 1600 > config.limits.tool_response_chars:
         raise ConfigError("limits.tool_response_chars: insuficiente para limits.context_bytes.")
 
     def connect():
@@ -184,4 +186,6 @@ def serve(config):
         access_log=False,
         limit_concurrency=64,
         timeout_keep_alive=5,
+        timeout_graceful_shutdown=15,
+        h11_max_incomplete_event_size=16384,
     )
