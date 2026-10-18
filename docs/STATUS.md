@@ -82,3 +82,23 @@ Corrigido pelo worker-opus (6247a69). 4ª passada do gpt-6-astra: I1, I2 e S1 re
 - Servidor atualizado para 229371a, a versão aprovada na T16.
 - vercel_origin ligado e login no painel OK (o rewrite /callback foi corrigido em 3fa782a).
 - Próximo: T17, um passo por vez, seguindo o checklist do docs/DEPLOY.md. Primeiro passo: conferir as duas contas depois da troca para token com tag.
+
+## 2026-10-18 — pausa (Davi ocupado). Onde paramos
+**T17:**
+- [x] As duas contas renovaram o token e listam o Teste v1 (celular).
+- [x] Pela URL pública: /mcp sem token dá 401 com descoberta; token falso dá 401; Origin estranho dá 403; headers de proxy forjados são ignorados.
+- [x] Painel da Vercel: login OK.
+- [ ] Reboot: ADIADO. O Davi só volta para a casa do servidor daqui ~1 semana (perto de 2026-10-25) e não pode reiniciar à distância.
+- [ ] SIGKILL do serviço (não reinicia o Ubuntu; pode ser feito à distância): `sudo systemctl kill --signal=SIGKILL batataswap.service; sleep 8; systemctl is-active batataswap; curl -s -H 'Host: batatarp.tail0512bc.ts.net' http://127.0.0.1:8780/saude`
+- [ ] Trancamento por login errado + unlock, backup restaurado de verdade, recuperação em host limpo, logs sem segredo.
+
+**Salvamento automático a cada resposta** (pedido do Davi):
+- Explicado ao Davi: trocar de conta automaticamente (tipo cswap) no navegador e no app não é possível e contorna o limite (termos da Anthropic). Ele aceitou ficar com a troca manual + "retoma".
+- Passo 1, PENDENTE no servidor:
+  `sudo sed -i -e 's/^daily_writes = 300$/daily_writes = 1000/' -e 's/^daily_bytes = 4194304$/daily_bytes = 8388608/' /etc/batataswap/batataswap.toml`
+  e depois check-config + restart.
+- Passo 2, PENDENTE: o Davi cola nas preferências das 2 contas a frase:
+  "Quando o BatataSwap estiver conectado: 1. Ao fim de CADA resposta, chame anexar_mensagens no projeto atual com a minha mensagem e um resumo curto do que você fez e do próximo passo. 2. Ao concluir cada etapa importante, chame salvar_contexto com resumo, decisões, pendências e a tarefa em andamento. 3. Se eu disser "retoma" numa conversa nova, chame buscar_contexto e ler_conversa do projeto, veja a última tarefa em andamento e continue dela, sem recomeçar nem refazer o que já foi feito."
+- Depois de configurado, testar a passagem no meio de uma tarefa (conta 1 → "retoma" na conta 2).
+
+Até a T17 terminar, só dado de teste.
