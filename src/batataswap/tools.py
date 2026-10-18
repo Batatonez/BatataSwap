@@ -39,10 +39,11 @@ def _json(value):
 
 def result(data, *, saved=False, error=False):
     if saved:
-        data = {"tipo": "dados_salvos", "verificada": False, "aviso": HEADER, **data}
+        data = {**data, "tipo": "dados_salvos", "verificada": False, "aviso": HEADER}
         nonce = secrets.token_hex(16)
         # JSON escapa quebras de linha; conteúdo salvo não cria uma linha delimitadora.
-        body = _json(data)
+        body = json.dumps(data, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        body = body.replace("<", "\\u003c").replace(">", "\\u003e")
         text = f"{HEADER}\n<<<DADOS id={nonce}>>>\n{body}\n<<<FIM DADOS id={nonce}>>>"
     else:
         text = _json(data)
@@ -54,11 +55,7 @@ def result(data, *, saved=False, error=False):
 
 
 def response_size(response):
-    # Conta também o escape JSON do texto dentro de content, de forma conservadora.
-    content = [
-        c.model_dump(mode="json", by_alias=True, exclude_none=True) for c in response.content
-    ]
-    return len(_json(content)) + len(_json(response.structured_content))
+    return sum(len(c.text) for c in response.content if c.type == "text")
 
 
 def schemas(limits):
@@ -82,7 +79,7 @@ def schemas(limits):
                 "pendencias": strings,
                 "preferencias": strings,
             },
-            ["projeto", "resumo", "decisoes", "pendencias", "preferencias"],
+            ["projeto", "resumo"],
         ),
         "buscar_contexto": ({"projeto": name, "versao": integer, "cursor": cursor}, ["projeto"]),
         "listar_projetos": ({"cursor": cursor}, []),
@@ -146,7 +143,10 @@ def _validate(value, schema):
         if set(value) - set(props) or set(schema["required"]) - set(value):
             raise mem.InvalidInput("Parâmetros inválidos: confira os campos obrigatórios.")
         for key, item in value.items():
-            _validate(item, props[key])
+            try:
+                _validate(item, props[key])
+            except mem.MemoryServiceError as error:
+                raise type(error)(f"Campo inválido: {key}.") from None
     elif kind == "array":
         if not schema.get("minItems", 0) <= len(value) <= schema["maxItems"]:
             raise mem.LimitExceeded("Lista fora dos limites permitidos. Nada foi gravado.")
@@ -177,10 +177,14 @@ def _read_page(conn, deps, actor, name, args, now, limit):
             state = {"stage": 1, "cursor": None}
             continue
         if name == "buscar_contexto" and stage == 1:
-            page = mem.list_preferences(conn, key, actor, state["cursor"], 1, now=now)
+            page = mem.list_preferences(
+                conn, key, actor, state["cursor"], limit - len(records), now=now
+            )
             field, kind = "preferencias", "preferencia"
         elif name == "listar_projetos" and stage == 0:
-            page = mem.list_projects(conn, key, actor, state["cursor"], 1, now=now)
+            page = mem.list_projects(
+                conn, key, actor, state["cursor"], limit - len(records), now=now
+            )
             field, kind = "projetos", "projeto"
         else:
             page = conv.list_conversations(
@@ -189,22 +193,10 @@ def _read_page(conn, deps, actor, name, args, now, limit):
                 actor,
                 projeto=args.get("projeto"),
                 cursor=state["cursor"],
-                limit=1,
+                limit=limit - len(records),
                 now=now,
             )
             field, kind = "conversas", "conversa"
-        if kind == "conversa":
-            for item in page[field]:
-                sender = conn.execute(
-                    "SELECT g.label FROM messages m "
-                    "JOIN conversations c ON c.id=m.conversation_id "
-                    "JOIN message_batches b ON b.id=m.batch_id "
-                    "JOIN oauth_grants g ON g.id=b.grant_id "
-                    "WHERE c.public_id=? AND m.trashed_at IS NULL AND m.purged_at IS NULL "
-                    "ORDER BY m.seq DESC LIMIT 1",
-                    (item["id"],),
-                ).fetchone()
-                item["enviado_por"] = sender[0] if sender else None
         records.extend({"tipo": kind, **item} for item in page[field])
         state = {
             "stage": stage if page["proximo_cursor"] else stage + 1,
@@ -223,7 +215,16 @@ def _read_page(conn, deps, actor, name, args, now, limit):
 def _execute(conn, deps, actor, name, args, now):
     key, limits = deps.keyring, deps.config.limits
     if name == "salvar_contexto":
-        return result(mem.save_context(conn, key, limits, actor, **args, now=now))
+        return result(
+            mem.save_context(
+                conn,
+                key,
+                limits,
+                actor,
+                **{"decisoes": [], "pendencias": [], "preferencias": [], **args},
+                now=now,
+            )
+        )
     if name == "registrar_preferencia":
         return result(mem.add_preference(conn, key, limits, actor, **args, now=now))
     if name == "anexar_mensagens":
@@ -286,8 +287,9 @@ def register_tools(server, deps):
         annotations = (
             {"readOnlyHint": True}
             if name in {"buscar_contexto", "listar_projetos", "buscar", "ler_conversa"}
-            else {}
+            else {"readOnlyHint": False, "destructiveHint": False}
         )
+        annotations["openWorldHint"] = False
         if name == "apagar":
             annotations["destructiveHint"] = True
         definitions.append(

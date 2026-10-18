@@ -359,6 +359,11 @@ def list_conversations(
         "SELECT cv.id, cv.public_id, cv.name_ct, cv.updated_at, cv.total_bytes, "
         "p.public_id, p.name_ct, (SELECT COALESCE(MAX(seq), 0) FROM messages m "
         "WHERE m.conversation_id = cv.id AND m.trashed_at IS NULL AND m.purged_at IS NULL) "
+        ", (SELECT g.label FROM messages m "
+        "JOIN message_batches b ON b.id=m.batch_id "
+        "JOIN oauth_grants g ON g.id=b.grant_id "
+        "WHERE m.conversation_id=cv.id AND m.trashed_at IS NULL AND m.purged_at IS NULL "
+        "ORDER BY m.seq DESC LIMIT 1) "
         "FROM conversations cv LEFT JOIN projects p ON p.id = cv.project_id "
         "WHERE cv.id > ? AND cv.trashed_at IS NULL AND cv.purged_at IS NULL "
         "AND (p.id IS NULL OR (p.trashed_at IS NULL AND p.purged_at IS NULL))"
@@ -375,6 +380,7 @@ def list_conversations(
             "projeto": _project_name(keyring, r[5], r[6]) if r[5] else None,
             "atualizada_em": iso(r[3]),
             "ultima_seq": r[7],
+            "enviado_por": r[8],
         }
         for r in rows[:limit]
     ]

@@ -7,6 +7,8 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 
 ## Pronto
 
+- T10: ferramentas MCP + app.py (painel plugado), revisado e corrigido. 670 testes.
+- T14 em andamento com o Davi: `instalar.sh` rodado no batatarp com o SHA fb1d8ac (T12 incluída); `public_origin` configurado. Próximos: key-init → init → atualizar pro SHA com as correções → serviço → T13b.
 - T15: interface da Vercel em `web/` (modo demo; `API_ORIGIN_AQUI` em `config.js` e no CSP do `vercel.json` a trocar pela origem real). Revisada pelo gpt-6.1-sol, correções aplicadas.
 - T02: esqueleto (`pyproject.toml`, `python -m batataswap --version`, CI, `requirements.lock` com hash, `NOTICE.md`).
 - Codex logado; luna, sol e astra respondem.

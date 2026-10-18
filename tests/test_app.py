@@ -5,11 +5,12 @@ import asyncio
 from dataclasses import replace
 
 import httpx
+import pytest
 from starlette.responses import HTMLResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from batataswap import __version__
+from batataswap import __version__, db
 from batataswap.app import create_app, serve
 from tests.test_oauth import (  # noqa: F401
     NOW,
@@ -49,6 +50,7 @@ def rpc(client, token, method, params=None, version="2026-07-28"):
             "Authorization": f"Bearer {token}",
             "MCP-Protocol-Version": version,
             "MCP-Method": method,
+            **({"Mcp-Name": params["name"]} if method == "tools/call" else {}),
             "Accept": "application/json, text/event-stream",
         },
         json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
@@ -102,7 +104,9 @@ def test_panel_token_rejected(env):
         resource=ORIGIN + "/api/painel",
     )
     with TestClient(app_for(env), base_url=ORIGIN) as client:
-        assert rpc(client, tokens.access_token, "tools/list").status_code in {401, 403}
+        response = rpc(client, tokens.access_token, "tools/list")
+        assert response.status_code == 401
+        assert 'error="invalid_token"' in response.headers["www-authenticate"]
 
 
 def test_html_referrer_and_extra_routes(env):
@@ -136,6 +140,7 @@ def test_serve_options(env, monkeypatch):
     calls = []
     monkeypatch.setattr("batataswap.app.load_master_key", lambda: bytes(32))
     monkeypatch.setattr("batataswap.app.uvicorn.run", lambda *a, **kw: calls.append(kw))
+    db.connect(env.path.parent / "batataswap.db", create=True).close()
     serve(replace(env.config, data_dir=env.path.parent))
     assert calls == [
         {
@@ -161,3 +166,147 @@ def test_httpx_asgi_transport(env):
             assert (await client.get("/saude")).json()["ok"]
 
     asyncio.run(run())
+
+
+def test_config_response_budget(env):
+    from batataswap.config import ConfigError
+
+    with pytest.raises(ConfigError):
+        create_app(
+            replace(env.config, limits=replace(env.config.limits, tool_response_chars=90000)),
+            env.keyring,
+            db_path=env.path,
+        )
+
+
+def test_serve_missing_database(env, monkeypatch):
+    monkeypatch.setattr("batataswap.app.load_master_key", lambda: bytes(32))
+    with pytest.raises(db.DatabaseError):
+        serve(replace(env.config, data_dir=env.path.parent / "missing"))
+
+
+def test_rpc_calls_versions_and_name(env):
+    token = claude_tokens(env).access_token
+    with TestClient(app_for(env), base_url=ORIGIN) as client:
+        for version in ("2026-07-28", "2025-11-25"):
+            response = rpc(
+                client, token, "tools/call", {"name": "listar_projetos", "arguments": {}}, version
+            )
+            assert response.status_code == 200, response.text
+            assert not response.json()["result"].get("isError")
+        response = client.post(
+            "/mcp",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "MCP-Protocol-Version": "2026-07-28",
+                "MCP-Method": "tools/call",
+                "Mcp-Name": "buscar",
+                "Accept": "application/json, text/event-stream",
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "listar_projetos", "arguments": {}},
+            },
+        )
+        assert response.status_code == 400
+
+
+def test_panel_routes_integrated(env):
+    from batataswap.auth.owner import verify_totp_only
+    from tests.test_oauth import VERCEL
+
+    verifier, challenge = pkce()
+    code, _ = make_code(env, painel_params(challenge), label="painel")
+    panel = exchange(
+        env,
+        code,
+        verifier,
+        client_id="painel-vercel",
+        redirect_uri=PAINEL_CALLBACK,
+        resource=ORIGIN + "/api/painel",
+    )
+    mcp = claude_tokens(env).access_token
+    app = app_for(env)
+    headers = {"Authorization": f"Bearer {panel.access_token}", "Origin": VERCEL}
+    with TestClient(app, base_url=ORIGIN) as client:
+        for path in ("conexoes", "atividade"):
+            response = client.get("/api/painel/" + path, headers=headers)
+            assert response.status_code == 200
+            assert response.headers["access-control-allow-origin"] == VERCEL
+            assert response.headers["cache-control"] == "no-store"
+            assert (
+                client.get(
+                    "/api/painel/" + path,
+                    headers={"Authorization": f"Bearer {mcp}", "Origin": VERCEL},
+                ).status_code
+                == 401
+            )
+        assert (
+            client.post(
+                "/api/painel/revogar",
+                headers={"Authorization": f"Bearer {mcp}", "Origin": VERCEL},
+                json={"rotulo": "conta-1", "totp": "000000"},
+            ).status_code
+            == 401
+        )
+        for _ in range(5):
+            assert (
+                client.post(
+                    "/api/painel/revogar",
+                    headers=headers,
+                    json={"rotulo": "conta-1", "totp": "000000"},
+                ).status_code
+                == 403
+            )
+        assert (
+            client.post(
+                "/api/painel/revogar", headers=headers, json={"rotulo": "conta-1", "totp": "000000"}
+            ).status_code
+            == 429
+        )
+        assert (
+            verify_totp_only(
+                env.conn, env.keyring, app.state.oauth_deps.budget, "000000", None, NOW
+            ).status
+            == "trancado"
+        )
+
+
+def test_mcp_edge_guards(env, monkeypatch):
+    token = claude_tokens(env).access_token
+    app = app_for(env)
+    with TestClient(app, base_url=ORIGIN) as client:
+        response = client.post("/mcp", headers={"Authorization": "Bearer invalido"})
+        assert response.status_code == 401
+        assert response.headers["www-authenticate"].startswith("Bearer resource_metadata=")
+        response = client.post("/mcp", headers={"Authorization": "Bearer bsw_at_" + "A" * 43})
+        assert response.status_code == 401
+        assert 'error="invalid_token"' in response.headers["www-authenticate"]
+        assert client.post("/mcp", content=b"x" * 8193).status_code == 401
+        assert (
+            client.post(
+                "/oauth/token",
+                content=b"x" * 8193,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            ).status_code
+            == 413
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        assert (
+            client.post("/mcp", headers=headers, content=b"x" * (256 * 1024 + 1)).status_code == 413
+        )
+        assert (
+            client.post("/mcp", headers={**headers, "Origin": "https://claude.ai"}).status_code
+            == 403
+        )
+        assert client.get("/static/%2e%2e/x").status_code == 400
+        response = rpc(client, token, "tools/list")
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["x-content-type-options"] == "nosniff"
+        app.state.oauth_deps.clock = lambda: NOW + 10 * 365 * 86400
+        assert rpc(client, token, "tools/list").status_code == 401
+        app.state.oauth_deps.clock = lambda: NOW
+        env.conn.execute("UPDATE oauth_grants SET revoked_at=?", (NOW,))
+        assert rpc(client, token, "tools/list").status_code == 401

@@ -18,14 +18,19 @@ from batataswap import __version__, db, logs
 from batataswap.auth import oauth
 from batataswap.auth.ratelimit import Budget, ScryptSlot
 from batataswap.auth.routes import OAuthDeps, bearer_context, bearer_error_response, oauth_routes
+from batataswap.config import ConfigError
 from batataswap.crypto import Keyring, load_master_key
 from batataswap.edge import EdgeMiddleware, RoutePolicy
 from batataswap.memory import Actor
+from batataswap.panel_api import panel_routes
 from batataswap.tools import register_tools, request_actor
 
 
 def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_routes=()):
     """Cria ASGI sem iniciar rede. extra_routes precedem as reservas dos painéis futuros."""
+
+    if config.limits.context_bytes * 3 + 1600 > config.limits.tool_response_chars:
+        raise ConfigError("limits.tool_response_chars: insuficiente para limits.context_bytes.")
 
     def connect():
         return db.connect(Path(db_path))
@@ -71,7 +76,11 @@ def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_rout
         stateless_http=True,
         json_response=True,
         max_request_body_size=config.limits.mcp_body_bytes,
-        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=[config.authority, config.authority + ":443"],
+            allowed_origins=[],
+        ),
     )
     transport_handler = next(route.endpoint for route in transport.routes if route.path == "/mcp")
 
@@ -112,6 +121,7 @@ def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_rout
         Route("/saude", health, methods=["GET"]),
         Route("/static/{path:path}", StaticHandler(), methods=["GET"]),
         *extra_routes,
+        *panel_routes(deps),
         # Reservas negam acesso e mantêm a política completa verificável antes da T11/T18.
         Route("/api/painel/{path:path}", unavailable, methods=["GET", "POST"]),
         Route("/painel/{path:path}", unavailable, methods=["GET", "POST"]),
@@ -145,7 +155,9 @@ def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_rout
 
 def serve(config):
     """T12: banco deve existir (init); chave vem da credencial systemd, nunca do banco."""
-    app = create_app(config, Keyring(load_master_key()), db_path=config.data_dir / "batataswap.db")
+    path = config.data_dir / "batataswap.db"
+    db.connect(path).close()
+    app = create_app(config, Keyring(load_master_key()), db_path=path)
     uvicorn.run(
         app,
         host=config.bind_host,
