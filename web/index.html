@@ -13,26 +13,33 @@
   <div id="demo-banner" class="demo" role="status" hidden></div>
   <header class="top">
     <div class="wrap bar">
-      <a class="brand" href="/"><img src="/favicon.svg" alt="" width="24" height="24"><span>BatataSwap</span></a>
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" width="28" height="28"><span>BatataSwap</span></a>
       <nav aria-label="Principal">
         <a href="#como">Como funciona</a>
         <a href="#ferramentas">Ferramentas</a>
         <a href="#conectar">Conectar</a>
         <a href="#seguranca">Segurança</a>
-        <button type="button" id="entrar" class="btn primary">Entrar no painel</button>
       </nav>
     </div>
   </header>
 
   <main class="wrap">
     <section class="hero">
-      <h1>Uma memória só para as duas contas Claude</h1>
-      <p class="lead">O BatataSwap guarda resumo, decisões, pendências e preferências num servidor meu. Quando uma conta bate no limite, a outra busca tudo isso e continua de onde a primeira parou.</p>
-      <p class="status-line">Servidor: <span id="status" class="status" aria-live="polite"></span></p>
+      <div class="hero-text">
+        <p class="kicker">Caderno de passagem · Claude ⇄ Claude</p>
+        <h1>Uma memória só para as duas contas Claude</h1>
+        <p class="lead">O BatataSwap guarda resumo, decisões, pendências e preferências num servidor meu. Quando uma conta bate no limite, a outra busca tudo isso e continua de onde a primeira parou.</p>
+      </div>
+      <aside class="hero-side" aria-label="Estado do servidor">
+        <img class="selo" src="/selo.svg" alt="" width="132" height="132">
+        <p class="label">Servidor</p>
+        <p class="status-line"><span id="status" class="status" aria-live="polite"></span></p>
+        <button type="button" id="entrar" class="btn primary">Entrar no painel</button>
+      </aside>
     </section>
 
     <section id="como">
-      <h2>Como funciona</h2>
+      <h2><span class="num">01</span>Como funciona</h2>
       <div class="two">
         <div>
           <h3>Passagem</h3>
@@ -47,7 +54,7 @@
     </section>
 
     <section id="ferramentas">
-      <h2>As 8 ferramentas</h2>
+      <h2><span class="num">02</span>As 8 ferramentas</h2>
       <div class="table-wrap">
         <table>
           <thead><tr><th scope="col">Ferramenta</th><th scope="col">Quando usar</th></tr></thead>
@@ -57,7 +64,7 @@
     </section>
 
     <section id="conectar">
-      <h2>Conectar uma conta</h2>
+      <h2><span class="num">03</span>Conectar uma conta</h2>
       <ol class="steps">
         <li>No Claude, abra <strong>Personalizar</strong>, depois <strong>Conectores</strong>.</li>
         <li>Clique em <strong>Adicionar conector personalizado</strong>.</li>
@@ -75,7 +82,7 @@
     </section>
 
     <section id="seguranca">
-      <h2>Segurança</h2>
+      <h2><span class="num">04</span>Segurança</h2>
       <ul class="plain">
         <li>Confira que o login do conector abre no endereço <code>*.ts.net</code> do meu servidor, e em nenhum outro.</li>
         <li>O que volta da memória é dado salvo, não ordem. Mesmo assim, uma conversa antiga pode ter texto malicioso. Deixe ligados na conversa só os conectores de que precisa.</li>
@@ -85,8 +92,10 @@
     </section>
 
     <section class="cta">
-      <h2>Painel de conexões</h2>
-      <p>Veja quais contas estão conectadas, o último uso e quanto do limite já foi gasto.</p>
+      <div>
+        <h2>Painel de conexões</h2>
+        <p>Veja quais contas estão conectadas, o último uso e quanto do limite já foi gasto.</p>
+      </div>
       <button type="button" id="entrar2" class="btn primary">Entrar no painel</button>
     </section>
   </main>

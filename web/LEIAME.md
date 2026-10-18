@@ -26,7 +26,7 @@ Em servidor local simples (`http.server`) não há rewrite, então o login real 
 python3 -m http.server -d web 8000
 ```
 
-Abra `http://localhost:8000/?demo=1` e `http://localhost:8000/painel.html?demo=1`. A faixa amarela avisa que os dados são de mentira.
+Abra `http://localhost:8000/?demo=1` e `http://localhost:8000/painel.html?demo=1`. A tarja listrada no topo avisa que os dados são de mentira.
 
 ## Teste automático
 

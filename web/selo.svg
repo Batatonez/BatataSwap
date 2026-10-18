@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="Selo BatataSwap">
+  <style>
+    .t { fill: #A4452C; stroke: #A4452C; }
+
+    .x { font: 700 14px "Courier New", ui-monospace, monospace; letter-spacing: 2.5px; fill: #A4452C; }
+    @media (prefers-color-scheme: dark) { .t { fill: #D9825F; stroke: #D9825F; } .x { fill: #D9825F; } }
+    .f { fill: none; }
+  </style>
+  <defs><path id="arc" d="M100 100 m-72 0 a72 72 0 1 1 144 0 a72 72 0 1 1 -144 0"/></defs>
+  <g transform="rotate(-9 100 100)">
+    <circle class="t f" cx="100" cy="100" r="94" stroke-width="3"/>
+    <circle class="t f" cx="100" cy="100" r="50" stroke-width="1.5"/>
+    <text class="x"><textPath href="#arc" startOffset="0">MEMÓRIA COMPARTILHADA · 2 CONTAS · </textPath></text>
+    <path class="t f" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" d="M66 104c0-17 13-29 31-29 16 0 27 9 27 23 0 17-15 28-33 28-13 0-25-8-25-22z"/>
+    <circle class="t" cx="85" cy="96" r="2.4" stroke="none"/>
+    <circle class="t" cx="106" cy="111" r="2.4" stroke="none"/>
+    <circle class="t" cx="110" cy="92" r="1.9" stroke="none"/>
+  </g>
+</svg>
