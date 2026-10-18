@@ -44,7 +44,8 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-17 | Revisão T07 | 3 | gpt-6.1-sol (Codex) | 0 crítico, 2 importantes (overflow e exceção com resposta em streaming), 2 sugestões |
 | 2026-10-17 | Correções T07 | 3 | worker-opus | ok (127 testes; check_against pra T10) |
 | 2026-10-17/18 | T08 OAuth AS+RS, CIMD, páginas | 3 | worker-opus | ok (591 testes no total); parou 1× no limite de uso da conta e foi retomado |
-| 2026-10-18 | Revisão T08 | 4 | gpt-6-astra (Codex) | 0 crítico, 2 importantes (reuso de código revogava antes de validar PKCE; CIMD sem deadline global), 2 sugestões; correções com worker-opus |
+| 2026-10-18 | Revisão T08 | 4 | gpt-6-astra (Codex) | 0 crítico, 2 importantes (reuso de código revogava antes de validar PKCE; CIMD sem deadline global), 2 sugestões |
+| 2026-10-18 | Correções T08 (I1, I2, S3 com migração 0002, S4 parcial) | 3 | worker-opus | ok (634 testes); teste de navegador real do Origin fica pra T13b |
 | 2026-10-17 | T03 Spike no servidor real | 2 | Davi + orquestrador | ok: transporte (web + Claude Code web) e descoberta OAuth até o authorize; client_id medido |
 | 2026-10-17 | T14 Deploy (units, timers, admin, instalar/atualizar, DEPLOY.md) | 3 | gpt-6.1-sol (Codex) | estrutura ok (12 testes, systemd-analyze verify) |
 | 2026-10-17 | Revisão T14 | 3 | worker-opus | **2 críticos** (init deixava banco com dono root; build sem hash como root), 7 importantes; precisa 2ª revisão depois da T12 |

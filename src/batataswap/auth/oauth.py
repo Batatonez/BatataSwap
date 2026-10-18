@@ -677,16 +677,16 @@ def _issue(conn, grant, policy: ClientPolicy, family_id, code_hash, scope_out, n
     access = new_token(ACCESS_PREFIX)
     access_exp = min(now + policy.access_ttl, grant_expires)
     conn.execute(
-        "INSERT INTO oauth_tokens(token_hash,kind,grant_id,family_id,code_hash,expires_at) "
-        "VALUES (?,?,?,?,?,?)",
-        (token_hash(access), "access", grant_id, family_id, code_hash, access_exp),
+        "INSERT INTO oauth_tokens(token_hash,kind,grant_id,family_id,code_hash,expires_at,scope) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (token_hash(access), "access", grant_id, family_id, code_hash, access_exp, scope_out),
     )
     refresh = None
     if policy.refresh:
         refresh = new_token(REFRESH_PREFIX)
         conn.execute(
-            "INSERT INTO oauth_tokens(token_hash,kind,grant_id,family_id,code_hash,expires_at) "
-            "VALUES (?,?,?,?,?,?)",
+            "INSERT INTO oauth_tokens(token_hash,kind,grant_id,family_id,code_hash,expires_at,"
+            "scope) VALUES (?,?,?,?,?,?,?)",
             (
                 token_hash(refresh),
                 "refresh",
@@ -694,6 +694,7 @@ def _issue(conn, grant, policy: ClientPolicy, family_id, code_hash, scope_out, n
                 family_id,
                 code_hash,
                 min(now + REFRESH_TTL, grant_expires),
+                scope_out,
             ),
         )
     _audit(conn, "token_emitido", grant_id, public_id, now)
@@ -745,8 +746,18 @@ def _exchange_code(conn, config: Config, params, now: int) -> TokenResponse:
             grant_scope,
             grant_client,
         ) = row
+        # Vínculos e PKCE primeiro, mesmo para código já usado: quem tem só o código (sem o
+        # verifier, ou com outro client/redirect/resource) não consegue derrubar a conexão.
+        if grant_client != client_id:
+            raise _err("invalid_grant", "codigo emitido para outro cliente")
+        if code_redirect != redirect_uri or redirect_uri != policy.redirect_uri:
+            raise _err("invalid_grant", "redirect_uri nao confere")
+        if code_resource != resource:
+            raise _err("invalid_target", "resource nao confere")
+        if not _pkce_ok(verifier, challenge):
+            raise _err("invalid_grant", "PKCE invalido")
         if used_at is not None:
-            # RFC 9700 §4.2.4: código reusado revoga o que foi emitido com ele (e o grant).
+            # RFC 9700 §4.2.4: replay validado revoga o que foi emitido com ele (e o grant).
             conn.execute(
                 "UPDATE oauth_tokens SET revoked_at=? WHERE code_hash=? AND revoked_at IS NULL",
                 (now, code_hash),
@@ -758,14 +769,6 @@ def _exchange_code(conn, config: Config, params, now: int) -> TokenResponse:
         else:
             if code_exp <= now:
                 raise _err("invalid_grant", "codigo invalido ou expirado")
-            if grant_client != client_id:
-                raise _err("invalid_grant", "codigo emitido para outro cliente")
-            if code_redirect != redirect_uri or redirect_uri != policy.redirect_uri:
-                raise _err("invalid_grant", "redirect_uri nao confere")
-            if code_resource != resource:
-                raise _err("invalid_target", "resource nao confere")
-            if not _pkce_ok(verifier, challenge):
-                raise _err("invalid_grant", "PKCE invalido")
             if grant_revoked is not None or grant_exp <= now:
                 raise _err("invalid_grant", "autorizacao revogada ou expirada")
             if not set(grant_scope.split(" ")) <= policy.scopes:
@@ -976,7 +979,8 @@ def validate_bearer(
     if not _opaque(token) or not token.startswith(ACCESS_PREFIX):
         raise invalid()
     row = conn.execute(
-        "SELECT g.id, g.public_id, g.label, g.scope, g.resource, g.last_used_at "
+        "SELECT g.id, g.public_id, g.label, COALESCE(t.scope, g.scope), g.resource, "
+        "g.last_used_at "
         "FROM oauth_tokens t JOIN oauth_grants g ON g.id=t.grant_id "
         "WHERE t.token_hash=? AND t.kind='access' AND t.revoked_at IS NULL AND t.expires_at>? "
         "AND g.revoked_at IS NULL AND g.expires_at>?",

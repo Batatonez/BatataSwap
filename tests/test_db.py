@@ -128,18 +128,20 @@ def test_migration_rollback_and_invalid_name(database, tmp_path, monkeypatch):
     conn, _ = database
     directory = tmp_path / "migrations"
     directory.mkdir()
-    # Inclui a migração conhecida para manter a compatibilidade com o banco existente.
+    # Inclui as migrações conhecidas para manter a compatibilidade com o banco existente.
     original = db.resources.files("batataswap.migrations")
-    (directory / "0001_inicial.sql").write_text(original.joinpath("0001_inicial.sql").read_text())
-    second = directory / "0002_failure.sql"
-    second.write_text("CREATE TABLE temporary_table(id INTEGER) STRICT; INVALID SQL;")
+    for entry in original.iterdir():
+        if entry.name.endswith(".sql"):
+            (directory / entry.name).write_bytes(entry.read_bytes())
+    failing = directory / "0003_failure.sql"
+    failing.write_text("CREATE TABLE temporary_table(id INTEGER) STRICT; INVALID SQL;")
     monkeypatch.setattr(db.resources, "files", lambda package: directory)
     with pytest.raises(DatabaseError):
         migrate(conn)
     assert not conn.execute(
         "SELECT 1 FROM sqlite_schema WHERE name = ?", ("temporary_table",)
     ).fetchone()
-    assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 2
     (directory / "invalid.sql").write_text("SELECT 1;")
     with pytest.raises(DatabaseError, match="Nome de migração inválido"):
         migrate(conn)

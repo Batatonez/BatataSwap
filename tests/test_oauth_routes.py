@@ -39,7 +39,10 @@ STATIC_RULE = RouteRule("GET", "/static/*", "public", static=True)
 
 
 def policy():
-    return RoutePolicy([*RoutePolicy.default().rules, STATIC_RULE])
+    default = RoutePolicy.default()
+    if any(r.path == STATIC_RULE.path for r in default.rules):
+        return default  # a borda já tem a regra do CSS
+    return RoutePolicy([*default.rules, STATIC_RULE])
 
 
 def stub_routes(deps):
@@ -234,11 +237,32 @@ def test_metadata_routes(server):
 
 def test_routes_match_edge_policy(server):
     policy().check_against(server.routes)
-    with pytest.raises(ValueError) as caught:
-        RoutePolicy.default().check_against(server.routes)
-    # Única divergência: o CSS das páginas (a borda precisa de uma regra estática).
-    assert pages.STATIC_PATH in str(caught.value)
-    assert str(caught.value).count("rota sem regra") == 1
+    default = RoutePolicy.default()
+    if any(r.path == STATIC_RULE.path for r in default.rules):
+        default.check_against(server.routes)
+    else:
+        with pytest.raises(ValueError) as caught:
+            default.check_against(server.routes)
+        # Única divergência: o CSS das páginas (a borda precisa de uma regra estática).
+        assert pages.STATIC_PATH in str(caught.value)
+        assert str(caught.value).count("rota sem regra") == 1
+
+
+def test_form_origin_with_referrer_meta(server):
+    """Revisão S4 (sem Playwright na .venv): com Referrer-Policy no-referrer o navegador manda
+    ``Origin: null`` no POST do formulário. As páginas trazem o meta ``same-origin``, o que faz
+    o navegador mandar ``Origin`` = <api>; a borda aceita esse e recusa ``null``."""
+    browser = server.browser()
+    _, challenge = pkce()
+    tx, csrf, page = authorize(browser, claude_query(challenge))
+    assert '<meta name="referrer" content="same-origin">' in page.text
+    assert page.headers["referrer-policy"] in ("same-origin", "no-referrer")
+    assert 'method="post" action="/oauth/login"' in page.text
+    data = {"tx": tx, "csrf": csrf, "senha": "x", "codigo": "000000"}
+    refused = browser.post("/oauth/login", data=data, headers={"Origin": "null"})
+    assert refused.status_code == 403
+    accepted = browser.post("/oauth/login", data=data, headers={"Origin": ORIGIN})
+    assert accepted.status_code == 401  # chegou no handler: senha errada
 
 
 def test_stylesheet_is_static(server):

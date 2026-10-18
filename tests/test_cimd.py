@@ -2,6 +2,7 @@
 
 import json
 import secrets
+import time
 
 import httpx2
 import pytest
@@ -217,3 +218,56 @@ def test_httpx_fetcher_timeout_and_network(mock_http):
     mock_http["handler"] = down
     with pytest.raises(CIMDError):
         cimd.httpx_fetcher(CLAUDE_CIMD_CLIENT_ID)
+
+
+# ---------------------------------------------------------------------------
+# Prazo global (revisão I2): atraso na conexão/headers ou no corpo não passa do timeout
+# ---------------------------------------------------------------------------
+
+
+class _SlowBody(httpx2.SyncByteStream):
+    def __init__(self, pieces, delay):
+        self.pieces = pieces
+        self.delay = delay
+
+    def __iter__(self):
+        for piece in self.pieces:
+            time.sleep(self.delay)
+            yield piece
+
+
+def _timed(call):
+    started = time.monotonic()
+    with pytest.raises(CIMDError) as caught:
+        call()
+    return time.monotonic() - started, caught.value
+
+
+def test_httpx_fetcher_deadline_on_connect_or_headers(mock_http):
+    def slow(request):
+        time.sleep(1.5)  # conexão ou headers demorando
+        return httpx2.Response(200, stream=httpx2.ByteStream(claude_document()))
+
+    mock_http["handler"] = slow
+    elapsed, error = _timed(lambda: cimd.httpx_fetcher(CLAUDE_CIMD_CLIENT_ID, timeout=0.3))
+    assert elapsed < 1.0 and "tempo esgotado" in str(error)
+
+
+def test_httpx_fetcher_deadline_on_slow_body(mock_http):
+    mock_http["handler"] = lambda r: httpx2.Response(200, stream=_SlowBody([b"{"] * 20, 0.1))
+    elapsed, error = _timed(lambda: cimd.httpx_fetcher(CLAUDE_CIMD_CLIENT_ID, timeout=0.35))
+    assert elapsed < 1.0 and "tempo esgotado" in str(error)
+
+
+def test_httpx_fetcher_deadline_on_stalled_body(mock_http):
+    mock_http["handler"] = lambda r: httpx2.Response(200, stream=_SlowBody([b"{", b"}"], 1.5))
+    elapsed, _ = _timed(lambda: cimd.httpx_fetcher(CLAUDE_CIMD_CLIENT_ID, timeout=0.3))
+    assert elapsed < 1.0
+
+
+def test_httpx_fetcher_default_timeout_is_global(mock_http):
+    mock_http["handler"] = lambda r: httpx2.Response(200, stream=httpx2.ByteStream(b"{}"))
+    cimd.httpx_fetcher(CLAUDE_CIMD_CLIENT_ID)
+    timeout = mock_http["kwargs"]["timeout"]
+    assert isinstance(timeout, httpx2.Timeout)
+    assert timeout.connect == timeout.read == timeout.write == timeout.pool == 5.0

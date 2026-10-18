@@ -635,6 +635,62 @@ def test_code_reuse_revokes(env):
     assert "codigo_reuso" in events and "grant_revogado" in events
 
 
+def test_code_reuse_without_bindings_does_not_revoke(env):
+    """Revisão I1: quem tem só o código (sem verifier/client/redirect certos) não derruba nada."""
+    verifier, challenge = pkce()
+    code, _ = make_code(env, claude_params(challenge))
+    tokens = exchange(env, code, verifier)
+    for changes in (
+        {"code_verifier": pkce()[0]},
+        {"code_verifier": "curto"},
+        {"client_id": "painel-vercel", "resource": ORIGIN + "/api/painel"},
+        {"redirect_uri": "https://claude.ai/outro"},
+    ):
+        with pytest.raises(oauth.OAuthError) as caught:
+            exchange(env, code, verifier, now=NOW + 5, **changes)
+        assert caught.value.error in ("invalid_grant", "invalid_target")
+        assert oauth.validate_bearer(
+            env.conn, tokens.access_token, ORIGIN + "/mcp", "memoria", NOW + 6
+        )
+    events = [r[0] for r in env.conn.execute("SELECT event FROM audit")]
+    assert "codigo_reuso" not in events
+    assert env.conn.execute("SELECT revoked_at FROM oauth_grants").fetchone()[0] is None
+    assert refresh(env, tokens.refresh_token, NOW + 7).access_token
+
+
+def test_token_scope_stored_and_effective(env):
+    """Revisão S3: o scope concedido fica no token; NULL (linha antiga) herda do grant."""
+    tokens = claude_tokens(env)
+    narrowed = refresh(env, tokens.refresh_token, NOW + 10, scope="memoria")
+    assert narrowed.scope == "memoria"
+    stored = env.conn.execute(
+        "SELECT kind, scope FROM oauth_tokens WHERE token_hash IN (?, ?)",
+        (token_hash(narrowed.access_token), token_hash(narrowed.refresh_token)),
+    ).fetchall()
+    assert sorted(stored) == [("access", "memoria"), ("refresh", "memoria")]
+    ctx = oauth.validate_bearer(
+        env.conn, narrowed.access_token, ORIGIN + "/mcp", "memoria", NOW + 11
+    )
+    assert ctx.scope == ("memoria",)
+    with pytest.raises(oauth.BearerError) as caught:
+        oauth.validate_bearer(
+            env.conn, narrowed.access_token, ORIGIN + "/mcp", "offline_access", NOW + 11
+        )
+    assert caught.value.status == 403
+    full = oauth.validate_bearer(
+        env.conn, tokens.access_token, ORIGIN + "/mcp", "memoria", NOW + 11
+    )
+    assert full.scope == ("memoria", "offline_access")
+    env.conn.execute(
+        "UPDATE oauth_tokens SET scope=NULL WHERE token_hash=?",
+        (token_hash(narrowed.access_token),),
+    )
+    legacy = oauth.validate_bearer(
+        env.conn, narrowed.access_token, ORIGIN + "/mcp", "memoria", NOW + 12
+    )
+    assert legacy.scope == ("memoria", "offline_access")
+
+
 def test_code_concurrent_exchange_single_winner(env):
     verifier, challenge = pkce()
     code, _ = make_code(env, claude_params(challenge))

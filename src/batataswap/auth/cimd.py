@@ -9,8 +9,10 @@ A busca é síncrona e bloqueante: quem chama roda isto fora do event loop.
 O ``fetcher`` é injetável para os testes não usarem rede.
 """
 
+import contextlib
 import json
 import sqlite3
+import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -54,40 +56,80 @@ class ClientInfo:
     redirect_uri: str  # o redirect da matriz §4.1 (já conferido contra o documento)
 
 
+_TIMEOUT_MESSAGE = "tempo esgotado ao buscar o documento do cliente"
+
+
+def _fetch(client, url: str, max_bytes: int, deadline: float) -> FetchResult:
+    def check_clock():
+        if time.monotonic() >= deadline:
+            raise CIMDError(_TIMEOUT_MESSAGE)
+
+    check_clock()
+    headers = {"Accept": "application/json", "Accept-Encoding": "identity"}
+    with client.stream("GET", url, headers=headers) as response:
+        check_clock()
+        # Sem compressão: o teto de 64 KiB vale para os bytes que realmente chegam.
+        if response.headers.get("content-encoding", "identity").lower() != "identity":
+            raise CIMDError("documento do cliente com codificação inesperada")
+        declared = response.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > max_bytes:
+            raise CIMDError("documento do cliente grande demais")
+        chunks = []
+        size = 0
+        for chunk in response.iter_raw():
+            check_clock()
+            size += len(chunk)
+            if size > max_bytes:
+                raise CIMDError("documento do cliente grande demais")
+            chunks.append(chunk)
+        check_clock()
+        headers = {k.lower(): v for k, v in response.headers.items()}
+        return FetchResult(response.status_code, headers, b"".join(chunks))
+
+
 def httpx_fetcher(url: str, max_bytes: int = MAX_BYTES, timeout: float = TIMEOUT_SECONDS):
     """Busca real com ``httpx2`` (o httpx que vem com o SDK ``mcp`` 2.x, já no lock).
 
     ``trust_env=False``: sem proxy nem netrc vindos do ambiente. ``follow_redirects=False``:
     um 3xx volta como está e é recusado na validação.
+
+    O prazo é global (conexão + headers + corpo): a busca roda numa thread própria e quem
+    chama espera no máximo ``timeout``. Estourou, o cliente é fechado (o que interrompe a
+    leitura em andamento) e a thread morre sozinha, presa também aos prazos por fase do httpx
+    e à checagem de relógio antes e depois de cada pedaço do corpo.
     """
     import httpx2  # import tardio: só a busca real precisa do cliente HTTP
 
     deadline = time.monotonic() + timeout
+    box: dict = {}
     try:
-        with httpx2.Client(follow_redirects=False, trust_env=False, timeout=timeout) as client:
-            headers = {"Accept": "application/json", "Accept-Encoding": "identity"}
-            with client.stream("GET", url, headers=headers) as response:
-                # Sem compressão: o teto de 64 KiB vale para os bytes que realmente chegam.
-                if response.headers.get("content-encoding", "identity").lower() != "identity":
-                    raise CIMDError("documento do cliente com codificação inesperada")
-                declared = response.headers.get("content-length")
-                if declared is not None and declared.isdigit() and int(declared) > max_bytes:
-                    raise CIMDError("documento do cliente grande demais")
-                chunks = []
-                size = 0
-                for chunk in response.iter_raw():
-                    size += len(chunk)
-                    if size > max_bytes:
-                        raise CIMDError("documento do cliente grande demais")
-                    if time.monotonic() > deadline:
-                        raise CIMDError("tempo esgotado ao buscar o documento do cliente")
-                    chunks.append(chunk)
-                headers = {k.lower(): v for k, v in response.headers.items()}
-                return FetchResult(response.status_code, headers, b"".join(chunks))
-    except CIMDError:
-        raise
-    except Exception:  # noqa: BLE001 (rede, TLS, timeout: tudo vira o mesmo erro, sem detalhe)
+        client = httpx2.Client(
+            follow_redirects=False, trust_env=False, timeout=httpx2.Timeout(timeout)
+        )
+    except Exception:  # noqa: BLE001
         raise CIMDError("não foi possível buscar o documento do cliente") from None
+
+    def run():
+        try:
+            box["result"] = _fetch(client, url, max_bytes, deadline)
+        except CIMDError as error:
+            box["error"] = error
+        except Exception:  # noqa: BLE001 (rede, TLS, timeout: tudo vira o mesmo erro)
+            box["error"] = CIMDError("não foi possível buscar o documento do cliente")
+        finally:
+            with contextlib.suppress(Exception):
+                client.close()
+
+    worker = threading.Thread(target=run, name="cimd-fetch", daemon=True)
+    worker.start()
+    worker.join(max(0.0, deadline - time.monotonic()))
+    if worker.is_alive():
+        with contextlib.suppress(Exception):
+            client.close()
+        raise CIMDError(_TIMEOUT_MESSAGE)
+    if "error" in box:
+        raise CIMDError(str(box["error"])) from None
+    return box["result"]
 
 
 def _cache_seconds(headers: Mapping[str, str], now: float) -> int:
