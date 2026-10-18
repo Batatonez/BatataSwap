@@ -14,7 +14,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.staticfiles import StaticFiles
 
-from batataswap import __version__, db
+from batataswap import __version__, db, logs
 from batataswap.auth import oauth
 from batataswap.auth.ratelimit import Budget, ScryptSlot
 from batataswap.auth.routes import OAuthDeps, bearer_context, bearer_error_response, oauth_routes
@@ -30,7 +30,7 @@ def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_rout
     def connect():
         return db.connect(Path(db_path))
 
-    options = {"clock": clock or time.time}
+    options = {"clock": clock or time.time, "on_event": logs.emit}
     if fetcher is not None:
         options["fetcher"] = fetcher
     deps = OAuthDeps(config, keyring, connect, Budget(), ScryptSlot(), **options)
@@ -44,7 +44,28 @@ def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_rout
     server = Server(
         "BatataSwap", version=__version__, on_list_prompts=prompts, on_list_resources=resources
     )
-    dispatch = register_tools(server, deps)
+
+    class LoggedRegistration:
+        def add_request_handler(self, name, params_type, handler):
+            if name == "tools/call":
+                original = handler
+
+                async def handler(ctx, params):
+                    start = time.monotonic()
+                    response = await original(ctx, params)
+                    logs.tool(params.name, response, (time.monotonic() - start) * 1000)
+                    return response
+
+            server.add_request_handler(name, params_type, handler)
+
+    raw_dispatch = register_tools(LoggedRegistration(), deps)
+
+    async def dispatch(name, arguments):
+        start = time.monotonic()
+        response = await raw_dispatch(name, arguments)
+        logs.tool(name, response, (time.monotonic() - start) * 1000)
+        return response
+
     transport = server.streamable_http_app(
         streamable_http_path="/mcp",
         stateless_http=True,
@@ -116,7 +137,7 @@ def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_rout
     inner.state.oauth_deps = deps
     inner.state.mcp_server = server
     inner.state.dispatch_tool = dispatch
-    app = EdgeMiddleware(inner, config=config, routes=policy)
+    app = EdgeMiddleware(inner, config=config, routes=policy, on_event=logs.emit)
     app.state = inner.state
     app.router = inner.router
     return app

@@ -54,3 +54,4 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-18 | Revisão T11 | 2 | gpt-6-luna (Codex) | 0 crítico, 1 importante (ultima_escrita contava lixeira); corrigido pelo worker-sonnet |
 | 2026-10-18 | T10 Ferramentas MCP + app | 3 | gpt-6.1-sol (Codex) | ok (suíte passa; só 12 testes próprios — cobertura fina); revisão do worker-opus em andamento |
 | 2026-10-18 | Redesign da interface web (creme, serifada, selo) | 2 | worker-sonnet | ok (pedido do Davi: visual anterior 'muito feio') |
+| 2026-10-18 | T12 CLI, backup/restore, logs JSON | 3 | gpt-6.1-sol (Codex) | ok (641 testes rodados pelo orquestrador; o sandbox do Codex trava em cliente HTTP); revisão do worker-opus em andamento |
