@@ -12,6 +12,10 @@ exigida e recusa cedo o que nem tem a forma certa. Ordem das checagens:
 5. corpo contado em streaming (anônimo: sem vaga, prazo desde a entrada; vaga só depois);
 6. headers de segurança em toda resposta, inclusive nos erros da própria borda.
 
+A vaga do pool anônimo cobre só o processamento do handler: ela é solta no
+``http.response.start`` (ou no fim, o que vier antes). O envio da resposta das rotas anônimas
+tem prazo total (``SEND_TIMEOUT``); estourou, a borda aborta a conexão.
+
 O uvicorn precisa rodar com ``server_header=False``, ``proxy_headers=False`` e
 ``forwarded_allow_ips=""``: o header ``Server`` é escrito pelo próprio uvicorn, fora do ASGI,
 e a borda só consegue remover o que o app mandar.
@@ -39,11 +43,15 @@ CORS_METHODS = ("GET", "POST")
 CORS_HEADERS = frozenset({"authorization", "content-type"})
 OTHER_BODY_BYTES = 16 * 1024
 SESSION_COOKIE = "__Host-bsw_sess"
+# Prazo total, em segundos, para enviar a resposta de uma rota anônima, contado do
+# ``http.response.start``. Cliente que não lê a resposta não segura a conexão para sempre.
+SEND_TIMEOUT = 5
 
 EVENTS = frozenset(
     {
         "websocket_recusado",
         "corpo_timeout",
+        "envio_timeout",
         "host_duplicado",
         "host_invalido",
         "caminho_invalido",
@@ -222,6 +230,10 @@ class RoutePolicy:
         )
 
 
+class _SendTimeout(Exception):
+    """O envio da resposta estourou ``send_timeout``; a conexão vai ser abortada."""
+
+
 def _json(message: str) -> bytes:
     return json.dumps({"erro": message}, ensure_ascii=False).encode()
 
@@ -251,6 +263,7 @@ class EdgeMiddleware:
         bearer_validator=None,
         body_total_timeout: float = 10,
         body_idle_timeout: float = 5,
+        send_timeout: float = SEND_TIMEOUT,
     ):
         if not isinstance(config, Config) or not isinstance(routes, RoutePolicy):
             raise TypeError("EdgeMiddleware: config e routes são obrigatórios.")
@@ -263,6 +276,7 @@ class EdgeMiddleware:
         self.app = app
         self.body_total_timeout = body_total_timeout
         self.body_idle_timeout = body_idle_timeout
+        self.send_timeout = send_timeout
         self.config = config
         self.routes = routes
         self.on_event = on_event
@@ -530,7 +544,9 @@ class EdgeMiddleware:
         # Corpo anônimo é lido SEM vaga do pool e com prazo contado desde a entrada: um corpo
         # incompleto nunca segura a admissão de um corpo pronto. A memória fica limitada pelo
         # teto de 8 KiB vezes o ``limit_concurrency`` do uvicorn. Só com o corpo completo a
-        # requisição disputa a vaga do pool, que fica com ela durante o handler (scrypt etc.).
+        # requisição disputa a vaga do pool, que fica com ela só durante o processamento do
+        # handler (scrypt etc.): a vaga é solta no ``http.response.start`` ou no fim, o que vier
+        # primeiro. O envio da resposta não segura vaga e tem prazo próprio (``send_timeout``).
         anonymous = not rule.category.startswith("bearer:")
         deadline = entered + self._body_timeout(rule, scope["path"]) if anonymous else None
         chunks = await self._read_body(scope, receive, send, rule, limit, cors_origin, deadline)
@@ -548,8 +564,8 @@ class EdgeMiddleware:
             if scope["path"] in {"/oauth/login", "/oauth/consent"}
             else "other"
         ]
-        acquired = anonymous and not bodyless
-        if acquired:
+        held = False
+        if anonymous and not bodyless:
             try:
                 await asyncio.wait_for(pool.acquire(), timeout=2)
             except TimeoutError:
@@ -561,11 +577,28 @@ class EdgeMiddleware:
                     cors_origin=cors_origin,
                     extra=[(b"retry-after", b"1")],
                 )
-        try:
-            await self._call_app(scope, receive, send, rule, cors_origin, chunks)
-        finally:
-            if acquired:
+            held = True
+
+        def release() -> None:
+            # Idempotente: chamado no início da resposta e de novo no ``finally``.
+            nonlocal held
+            if held:
+                held = False
                 pool.release()
+
+        try:
+            await self._call_app(
+                scope,
+                receive,
+                send,
+                rule,
+                cors_origin,
+                chunks,
+                on_start=release,
+                send_timeout=self.send_timeout if anonymous else None,
+            )
+        finally:
+            release()
 
     def _body_timeout(self, rule, path: str) -> float:
         if rule.category.startswith("bearer:"):
@@ -621,9 +654,22 @@ class EdgeMiddleware:
             if not message.get("more_body", False):
                 return chunks
 
-    async def _call_app(self, scope, receive, send, rule, cors_origin, chunks):
+    async def _call_app(
+        self, scope, receive, send, rule, cors_origin, chunks, *, on_start=None, send_timeout=None
+    ):
+        """Chama o app com o corpo já lido e filtra o que ele envia.
+
+        ``on_start`` roda uma vez, quando o app começa a responder (solta a vaga do pool).
+        ``send_timeout`` (segundos, contados do ``http.response.start``) limita o envio inteiro da
+        resposta; estourou, registra ``envio_timeout`` e levanta exceção para o servidor fechar
+        a conexão, mesmo que o app engula o erro.
+        """
         replayed = False
         started = False
+        send_deadline = None
+        send_expired = False
+        sent_status = 500
+        loop = asyncio.get_running_loop()
 
         async def replay_receive():
             nonlocal replayed
@@ -632,13 +678,35 @@ class EdgeMiddleware:
                 return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
             return await receive()
 
+        async def timed_send(message):
+            nonlocal send_expired
+            if send_deadline is None:
+                return await send(message)
+            if send_expired:
+                raise _SendTimeout
+            try:
+                remaining = send_deadline - loop.time()
+                if remaining <= 0:
+                    raise TimeoutError
+                async with asyncio.timeout(remaining):
+                    await send(message)
+            except TimeoutError:
+                send_expired = True
+                self._emit("envio_timeout", sent_status)
+                raise _SendTimeout from None
+
         async def guarded_send(message):
-            nonlocal started
+            nonlocal started, send_deadline, sent_status
             if message.get("type") == "http.response.start":
                 if started:
                     return
                 started = True
+                if on_start is not None:
+                    on_start()
+                if send_timeout is not None:
+                    send_deadline = loop.time() + send_timeout
                 status = message.get("status", 500)
+                sent_status = status
                 message = {
                     **message,
                     "headers": self._finalize(
@@ -651,11 +719,13 @@ class EdgeMiddleware:
                 self._emit("repassado", status)
             elif not started:
                 return
-            await send(message)
+            await timed_send(message)
 
         try:
             await self.app(scope, replay_receive, guarded_send)
         except Exception:  # noqa: BLE001 (toda exceção do app vira 500 genérico, sem detalhe)
+            if send_expired:
+                raise RuntimeError("envio_timeout") from None
             if started:
                 self._emit("erro_interno", 500)
                 # A resposta já começou: o status não muda mais. Relança uma exceção genérica,
@@ -666,6 +736,9 @@ class EdgeMiddleware:
                 send, 500, "erro_interno", cors=rule.cors, cors_origin=cors_origin
             )
             return
+        if send_expired:
+            # O app engoliu o erro do envio: a conexão ainda precisa ser abortada.
+            raise RuntimeError("envio_timeout")
         if not started:
             await self._send_error(
                 send, 500, "erro_interno", cors=rule.cors, cors_origin=cors_origin

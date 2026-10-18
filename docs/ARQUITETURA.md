@@ -602,10 +602,9 @@ Ordem:
 0. **Limpa o escopo**: remove `X-Forwarded-*`, `Forwarded`, `X-Real-IP`, `True-Client-IP`, `CF-*`; `client = None`; proto sempre `https`. O uvicorn roda com `proxy_headers=False` e `forwarded_allow_ips=""`.
 1. **Host**: exatamente a autoridade do `public_origin` (`batatarp.<tailnet>.ts.net`, aceitando também com `:443`), senão 421. O spike confirma o que o Funnel repassa.
 2. **CORS / preflight** (antes da autenticação), só em `/saude`, `/oauth/token` e `/api/painel/*`:
-   - `Origin` igual à origem exata da Vercel (config);
-   - métodos `GET, POST` (o `/saude` só `GET`);
-   - headers `Authorization, Content-Type`;
-   - sem `Access-Control-Allow-Credentials`;
+   - `/oauth/token` e `/api/painel/*`: `Origin` igual à origem exata da Vercel (config); métodos `GET, POST`; headers `Authorization, Content-Type`;
+   - `/saude`: CORS aberto, `Access-Control-Allow-Origin: *` para **qualquer** `Origin`, só `GET`, nenhum header pedido. É seguro porque a rota é pública e só devolve `ok` e a versão (o status ao vivo do site da Vercel lê daqui);
+   - nunca `Access-Control-Allow-Credentials`;
    - `Max-Age: 600`.
    Qualquer outro preflight → 403. O client do `/oauth/token` é validado no POST de verdade, não no preflight.
 3. **Origin em métodos que mudam estado**:
@@ -614,7 +613,10 @@ Ordem:
    - POST de `/oauth/token`, `/oauth/revoke` e `/api/painel/*`: sem `Origin` ou com a origem da Vercel;
    - GET de navegação (`/oauth/authorize`, páginas) **não** exige `Origin`.
 4. **Rota**: a decisão usa a rota que o roteador vai escolher (primeiro match completo, a mesma regra do Starlette). Só as rotas públicas do §3 passam sem credencial. `/mcp` e `/api/painel/*` exigem Bearer **do recurso certo** (§4.1); sem Bearer → 401 com `WWW-Authenticate: Bearer resource_metadata="<PRM daquele recurso>"`, e com scope errado → 403 `insufficient_scope`.
-5. **Corpo**, contado em streaming: 8 KiB sem credencial, 256 KiB em `/mcp` autenticado, 16 KiB no resto.
+5. **Corpo**, contado em streaming e lido inteiro **antes** do handler: 8 KiB sem credencial (4 KiB no `/oauth/token`), 256 KiB em `/mcp` autenticado, 16 KiB no resto. Estourou → 413; `Content-Length` declarado acima do teto → 413 sem ler.
+   - **Rotas anônimas** (tudo que não é Bearer): o corpo é lido **sem vaga** do pool, com prazo contado **desde a entrada na borda**: 1 s no `/oauth/token`, 3 s em `/oauth/login`, `/oauth/consent` e no resto. Estourou → 408 com `Connection: close`. Assim um corpo lento nunca segura a admissão de um corpo pronto.
+   - **Vaga do pool** (`/oauth/token` 8, login/consentimento 8 compartilhadas, resto 4): só depois do corpo completo, e só durante o **processamento** do handler (scrypt etc.). Espera até 2 s por vaga; sem vaga → 503 com `Retry-After: 1`. A vaga é solta quando o app começa a responder (`http.response.start`) ou no fim do handler, o que vier primeiro (uma vez só). GET/HEAD sem corpo não usam vaga.
+   - **Prazo de envio**: a resposta inteira de uma rota anônima tem 5 s (`SEND_TIMEOUT`), contados do `http.response.start`. Cliente que não lê a resposta estoura o prazo: a borda registra `envio_timeout` (agregado nos logs) e levanta exceção para o uvicorn fechar a conexão, mesmo que o app engula o erro. Rotas Bearer (`/mcp`, `/api/painel/*`) não têm esse prazo nem pool: o Bearer é validado antes do corpo, que tem prazo de 10 s no total e 5 s parado.
 6. **Headers de segurança** sempre:
    - `X-Content-Type-Options`, `X-Frame-Options: DENY`, HSTS;
    - `Referrer-Policy: same-origin` em respostas `text/html` e `no-referrer` no resto. Motivo: com `no-referrer`, o navegador manda `Origin: null` no POST do formulário (spec Fetch), e a checagem de Origin do login/consentimento recusaria o Davi;
@@ -868,10 +870,15 @@ Tomadas pelo orquestrador depois da revisão T01 (o Davi pode mudar):
 
 ### Isolamento de leitores anônimos e tamanho de leitura
 
-GET/HEAD sem corpo (Content-Length ausente ou zero, sem Transfer-Encoding) não
-ocupam vagas de leitura de corpo. `/oauth/token` tem pool de 8 vagas, teto de 4 KiB
-e prazo de 2 s; `/oauth/login` e `/oauth/consent` compartilham 8 vagas, 8 KiB e 3 s;
-o restante tem 4 vagas, até 8 KiB e 3 s. Excesso retorna 503 com `Retry-After: 1`.
+O corpo anônimo é lido **sem vaga**, com prazo contado desde a entrada na borda:
+`/oauth/token` tem teto de 4 KiB e 1 s; `/oauth/login`, `/oauth/consent` e o restante,
+8 KiB e 3 s. Estourou o prazo → 408. Só com o corpo completo a requisição disputa uma
+vaga do pool (`/oauth/token` 8; login e consentimento 8 compartilhadas; o resto 4),
+esperando até 2 s; sem vaga → 503 com `Retry-After: 1`. A vaga cobre só o processamento
+do handler e é solta no início da resposta. O envio da resposta tem prazo total de 5 s;
+estourou → evento `envio_timeout` e conexão abortada. GET/HEAD sem corpo
+(Content-Length ausente ou zero, sem Transfer-Encoding) não ocupam vaga. A memória de
+corpos em leitura fica limitada pelo teto de 8 KiB vezes o `limit_concurrency` do uvicorn.
 Permanece DoS volumétrico residual: saturar o pool de `/oauth/token` atrasa renovações;
 o Claude refaz o refresh e, no pior caso, o Davi reconecta. Banda, Funnel e conexões
 antes dos headers também permanecem limites externos.
