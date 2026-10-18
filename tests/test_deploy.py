@@ -128,6 +128,7 @@ def test_admin_allowlist(tmp_path):
     accepted -= {"key-init", "key-import"}
     assert accepted == {
         "serve",
+        "check-config",
         "init",
         "migrate",
         "key-export",
@@ -270,6 +271,16 @@ def test_build_and_revision_contract():
         r"^([a-z][a-z-]*==[^\n]+) \\\n    --hash=sha256:[0-9a-f]{64}", lock, re.MULTILINE
     )
     assert len(entries) >= 2
+
+
+def test_atualizar_valida_config_antes_de_iniciar():
+    script = (DEPLOY / "atualizar.sh").read_text()
+    check = (
+        'batataswap-admin check-config || { echo "Config inválida: corrija '
+        '/etc/batataswap/batataswap.toml e rode o atualizar de novo"; exit 1; }'
+    )
+    assert check in script
+    assert script.index(check) < script.index("systemctl start batataswap.service")
 
 
 def test_alert_unit():

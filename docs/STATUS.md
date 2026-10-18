@@ -53,6 +53,10 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 
 ## Pendências
 
+- Chave mestra exposta: o Davi decidiu **não recriar** (2026-10-18). Risco aceito por ele.
+- Produção: servidor em a6fb1e9 + TOML corrigido (tool_response_chars=140000); serviço ativo. Funnel ligado mas inacessível de fora (TLS falha) — investigando com o Davi.
+- T16 2ª passada perdida no reinício do container (astra e opus); relançar.
+
 - **Decisões do Davi pedidas pela T16:** (I10) recriar chave mestra, senha e TOTP depois do ensaio (a chave apareceu no chat) — recomendado; (I8) aceitar por escrito o risco residual de preferência envenenada por injeção; (I9) aceitar ou não ligar o painel da Vercel (`vercel_origin`) sabendo do risco de phishing.
 
 - **T16: gpt-6-astra deu 'não expor'** (6 importantes, ver DELEGATION_LOG). Funnel só para o ensaio T13b; desligar depois até as correções + 2ª passada. Correções das duas partes aplicadas (722 testes). 2ª passada (astra + opus) em andamento. Pendência: pior caso de escape com caracteres de controle no limite de resposta (fator 4 assume só `\\`).

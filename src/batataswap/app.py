@@ -18,7 +18,7 @@ from batataswap import __version__, db, logs
 from batataswap.auth import oauth
 from batataswap.auth.ratelimit import Budget, ScryptSlot
 from batataswap.auth.routes import OAuthDeps, bearer_context, bearer_error_response, oauth_routes
-from batataswap.config import ConfigError
+from batataswap.config import check_coherence
 from batataswap.crypto import Keyring, load_master_key
 from batataswap.edge import EdgeMiddleware, RoutePolicy
 from batataswap.memory import Actor
@@ -35,10 +35,7 @@ def _grant_atual():
 def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_routes=()):
     """Cria ASGI sem iniciar rede. extra_routes precedem as reservas dos painéis futuros."""
 
-    # Pior caso de escape: cada byte "\" vira 2 caracteres em content e 2 em structuredContent,
-    # então o contexto ocupa 4x context_bytes na resposta; 1600 cobre o resto do envelope.
-    if config.limits.context_bytes * 4 + 1600 > config.limits.tool_response_chars:
-        raise ConfigError("limits.tool_response_chars: insuficiente para limits.context_bytes.")
+    check_coherence(config)
 
     def connect():
         return db.connect(Path(db_path))

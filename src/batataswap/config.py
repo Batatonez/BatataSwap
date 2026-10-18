@@ -171,6 +171,14 @@ class Config:
         return urlsplit(self.public_origin).netloc
 
 
+def check_coherence(config: Config) -> None:
+    """Checagens entre limites exigidas antes de subir o servidor; mensagens só citam campos."""
+    # Pior caso de escape: cada byte "\" vira 2 caracteres em content e 2 em structuredContent,
+    # então o contexto ocupa 4x context_bytes na resposta; 1600 cobre o resto do envelope.
+    if config.limits.context_bytes * 4 + 1600 > config.limits.tool_response_chars:
+        raise ConfigError("limits.tool_response_chars: insuficiente para limits.context_bytes.")
+
+
 def load_config(path: Path | None = None) -> Config:
     path = Path(
         path

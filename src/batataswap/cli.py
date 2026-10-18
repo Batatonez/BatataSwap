@@ -14,7 +14,7 @@ from pathlib import Path
 
 from batataswap import __version__, backup, crypto, db, logs, memory
 from batataswap.auth import oauth, owner, passwords, totp
-from batataswap.config import load_config
+from batataswap.config import ConfigError, check_coherence, load_config
 
 
 class AdminError(Exception):
@@ -45,6 +45,7 @@ def main(
     commands = parser.add_subparsers(dest="command", required=True, metavar="comando")
     for name in (
         "serve",
+        "check-config",
         "key-import",
         "init",
         "migrate",
@@ -116,6 +117,11 @@ def main(
                 print(crypto.export_key(key))
             return 0
         config = config or load_config()
+        if command == "check-config":
+            # Só config: sem banco e sem chave, para o atualizar.sh validar antes de subir.
+            check_coherence(config)
+            print("Configuração válida.")
+            return 0
         if command == "serve":
             from batataswap.app import serve
 
@@ -257,7 +263,8 @@ def main(
             )
         message = "Não foi possível concluir o comando. Confira a configuração, os dados e as confirmações informadas."
         if isinstance(
-            error, (AdminError, memory.InvalidInput, db.DatabaseError, crypto.CryptoError)
+            error,
+            (AdminError, ConfigError, memory.InvalidInput, db.DatabaseError, crypto.CryptoError),
         ):
             message = str(error)
         elif isinstance(error, sqlite3.OperationalError) and "locked" in str(error):

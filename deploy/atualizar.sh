@@ -23,6 +23,7 @@ python3.12 -m venv .venv
 install -o root -g root -m 0644 deploy/*.service deploy/*.timer /etc/systemd/system/
 install -o root -g root -m 0755 deploy/batataswap-admin /usr/local/sbin/batataswap-admin
 systemctl daemon-reload
+batataswap-admin check-config || { echo "Config inválida: corrija /etc/batataswap/batataswap.toml e rode o atualizar de novo"; exit 1; }
 batataswap-admin migrate
 if [[ "$restart" == yes ]]; then
     systemctl start batataswap.service

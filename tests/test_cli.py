@@ -363,3 +363,42 @@ def test_preferences_and_purge_cli(setup_cli, capsys):
     ).fetchone() == (None,)
     assert conn.execute("SELECT grant_id FROM audit WHERE event='expurgar'").fetchone() == (None,)
     conn.close()
+
+
+def test_serve_prints_config_error_and_exits_1(setup_cli, monkeypatch, capsys):
+    from dataclasses import replace
+
+    from batataswap.config import Limits
+
+    config = replace(setup_cli, limits=Limits(tool_response_chars=1000))
+    run = Mock(side_effect=AssertionError("servidor não deve subir"))
+    monkeypatch.setattr("uvicorn.run", run)
+    assert cli.main(["serve"], config=config) == 1
+    err = capsys.readouterr().err
+    assert "tool_response_chars" in err
+    run.assert_not_called()
+
+
+def test_check_config_valid_and_invalid(setup_cli, capsys):
+    from dataclasses import replace
+
+    from batataswap.config import Limits
+
+    assert cli.main(["check-config"], config=setup_cli) == 0
+    assert "Configuração válida." in capsys.readouterr().out
+    broken = replace(setup_cli, limits=Limits(tool_response_chars=1000))
+    assert cli.main(["check-config"], config=broken) == 1
+    assert "tool_response_chars" in capsys.readouterr().err
+
+
+def test_check_config_needs_no_db_or_key(tmp_path, monkeypatch):
+    from batataswap.config import Config
+
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path / "sem-chave"))
+    config = Config(
+        public_origin="https://example.ts.net",
+        data_dir=tmp_path / "sem-banco",
+        backup_dir=tmp_path / "backups",
+    )
+    assert cli.main(["check-config"], config=config) == 0
+    assert not (tmp_path / "sem-banco").exists()
