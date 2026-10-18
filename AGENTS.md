@@ -72,7 +72,7 @@ Não copie código de outros repositórios do Davi (o BatataLink está fora dest
 
 - **Nada executa comando** vindo do MCP, do painel ou do banco. Sem `subprocess`, `eval`, `exec`, `pickle`, `shell=True`.
   - Única exceção: `src/batataswap/cli.py`, nos comandos de administração `key-init`/`key-import` (rodados como root no terminal), pode chamar `systemd-creds` com `subprocess.run([...], shell=False)` e argumentos fixos; a chave vai pelo stdin, nunca por argv. Nenhum outro módulo importa `subprocess`.
-- **Toda rota nega por padrão.** Só são públicas as rotas de descoberta OAuth, login/consentimento e `/saude`.
+- **Toda rota nega por padrão.** Só são públicas as rotas de descoberta OAuth, login/consentimento, `/saude` e o CSS estático em `/static/*`.
   `/mcp` exige token Bearer válido, emitido por este servidor e com audiência = URL do `/mcp`.
 - **Headers de proxy ignorados** (`X-Forwarded-*`, `Forwarded`, `X-Real-IP` etc.). O IP do visitante é desconhecido por desenho; rate limit não usa IP.
 - **Senha só como hash scrypt.** TOTP obrigatório. Rate limit no login.

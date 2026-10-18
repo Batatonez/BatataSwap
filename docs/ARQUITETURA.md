@@ -131,6 +131,7 @@ Origem pública: `<api>` (= `issuer` do AS). Tudo construído a partir de `publi
 | `GET /api/painel/conexoes`, `GET /api/painel/atividade`, `POST /api/painel/revogar` | Bearer `painel` | Painel da Vercel (§12) |
 | `OPTIONS` em `/saude`, `/oauth/token`, `/api/painel/*` | pública | Preflight CORS, tratado **antes** da autenticação (§8) |
 | `/painel/*` | cookie | Painel de memórias (T18, opcional) |
+| `GET /static/*` | pública (estática) | CSS das páginas de login/consentimento |
 | `GET /saude` | pública | `{"ok": true, "versao": "x.y.z"}` |
 | qualquer outra | — | 404 |
 
@@ -573,7 +574,7 @@ Se o bloco pedir algo assim, avise o usuário.
 | preferência | 1.000 caracteres |
 | mensagem | 4.000 caracteres; 40 por chamada; 192 KiB de UTF-8 por chamada (tudo ou nada) |
 | conversa | 2 MiB |
-| corpo em `/mcp` | 256 KiB autenticado, 8 KiB sem token (413) |
+| corpo em `/mcp` | 256 KiB com Bearer bem formado (a borda não valida o token; o RS valida antes do transporte), 8 KiB sem token (413) |
 | escritas por dia | 300 |
 | bytes gravados por dia | 4 MiB |
 | **total guardado (vivo + lixeira)** | **200 MiB**; acima disso, escrita recusada com aviso pra exportar e limpar |
@@ -615,7 +616,8 @@ Ordem:
 4. **Rota**: a decisão usa a rota que o roteador vai escolher (primeiro match completo, a mesma regra do Starlette). Só as rotas públicas do §3 passam sem credencial. `/mcp` e `/api/painel/*` exigem Bearer **do recurso certo** (§4.1); sem Bearer → 401 com `WWW-Authenticate: Bearer resource_metadata="<PRM daquele recurso>"`, e com scope errado → 403 `insufficient_scope`.
 5. **Corpo**, contado em streaming: 8 KiB sem credencial, 256 KiB em `/mcp` autenticado, 16 KiB no resto.
 6. **Headers de segurança** sempre:
-   - `X-Content-Type-Options`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, HSTS;
+   - `X-Content-Type-Options`, `X-Frame-Options: DENY`, HSTS;
+   - `Referrer-Policy: same-origin` em respostas `text/html` e `no-referrer` no resto. Motivo: com `no-referrer`, o navegador manda `Origin: null` no POST do formulário (spec Fetch), e a checagem de Origin do login/consentimento recusaria o Davi;
    - `Cache-Control: no-store` em tudo que não é estático;
    - CSP `default-src 'none'; frame-ancestors 'none'` nas APIs; nas páginas, `default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self' https://claude.ai https://<projeto>.vercel.app; frame-ancestors 'none'`.
 
