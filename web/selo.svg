@@ -3,7 +3,6 @@
     .t { fill: #A4452C; stroke: #A4452C; }
 
     .x { font: 700 14px "Courier New", ui-monospace, monospace; letter-spacing: 2.5px; fill: #A4452C; }
-    @media (prefers-color-scheme: dark) { .t { fill: #D9825F; stroke: #D9825F; } .x { fill: #D9825F; } }
     .f { fill: none; }
   </style>
   <defs><path id="arc" d="M100 100 m-72 0 a72 72 0 1 1 144 0 a72 72 0 1 1 -144 0"/></defs>
