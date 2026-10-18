@@ -75,3 +75,4 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-18 | T16 residuais da 3ª passada (I1 token sem tag, I2 ondas de corpo lento, S1 flush do log) | 3 | worker-opus | ok (764 testes) |
 | 2026-10-18 | T16 4ª passada (revisão) | 4 | gpt-6-astra | não expor: 1 IMPORTANTE (vaga presa no envio da resposta) |
 | 2026-10-18 | T16 vaga presa no envio + prazo de envio + ARQUITETURA §8 | 3 | worker-opus | ok (771 testes) |
+| 2026-10-18 | T16 5ª passada (revisão) | 4 | gpt-6-astra | não expor: 2 IMPORTANTES de DoS (envio preso antes dos headers, respostas da borda sem prazo) |
