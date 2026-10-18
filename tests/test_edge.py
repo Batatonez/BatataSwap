@@ -184,7 +184,7 @@ def bearer(token=TOKEN):
 
 def assert_security(r, *, html=False):
     assert r.header("x-content-type-options") == "nosniff"
-    assert r.header("referrer-policy") == "no-referrer"
+    assert r.header("referrer-policy") == ("same-origin" if html else "no-referrer")
     assert r.header("x-frame-options") == "DENY"
     assert r.header("strict-transport-security") == "max-age=31536000"
     assert r.header("cache-control") == "no-store"
@@ -881,6 +881,7 @@ DEFAULT_ROUTES = (
     ("/api/painel/revogar", ["POST"]),
     ("/painel/{pagina}", ["GET", "POST"]),
     ("/saude", ["GET"]),
+    ("/static/{path:path}", ["GET"]),
 )
 
 

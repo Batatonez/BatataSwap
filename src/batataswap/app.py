@@ -1,0 +1,138 @@
+"""Montagem do servidor: borda externa, OAuth próprio e transporte oficial MCP."""
+
+import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import anyio.to_thread
+import uvicorn
+from mcp import types
+from mcp.server.lowlevel import Server
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.applications import Starlette
+from starlette.responses import JSONResponse
+from starlette.routing import Route
+from starlette.staticfiles import StaticFiles
+
+from batataswap import __version__, db
+from batataswap.auth import oauth
+from batataswap.auth.ratelimit import Budget, ScryptSlot
+from batataswap.auth.routes import OAuthDeps, bearer_context, bearer_error_response, oauth_routes
+from batataswap.crypto import Keyring, load_master_key
+from batataswap.edge import EdgeMiddleware, RoutePolicy
+from batataswap.memory import Actor
+from batataswap.tools import register_tools, request_actor
+
+
+def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_routes=()):
+    """Cria ASGI sem iniciar rede. extra_routes precedem as reservas dos painéis futuros."""
+
+    def connect():
+        return db.connect(Path(db_path))
+
+    options = {"clock": clock or time.time}
+    if fetcher is not None:
+        options["fetcher"] = fetcher
+    deps = OAuthDeps(config, keyring, connect, Budget(), ScryptSlot(), **options)
+
+    async def prompts(ctx, params):
+        return types.ListPromptsResult(prompts=[])
+
+    async def resources(ctx, params):
+        return types.ListResourcesResult(resources=[])
+
+    server = Server(
+        "BatataSwap", version=__version__, on_list_prompts=prompts, on_list_resources=resources
+    )
+    dispatch = register_tools(server, deps)
+    transport = server.streamable_http_app(
+        streamable_http_path="/mcp",
+        stateless_http=True,
+        json_response=True,
+        max_request_body_size=config.limits.mcp_body_bytes,
+        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    )
+    transport_handler = next(route.endpoint for route in transport.routes if route.path == "/mcp")
+
+    class MCPHandler:
+        async def __call__(self, scope, receive, send):
+            try:
+                context = await bearer_context(deps, scope, "mcp")
+            except oauth.BearerError as error:
+                await bearer_error_response(error)(scope, receive, send)
+                return
+            token = request_actor.set(
+                Actor(context.grant_id, context.grant_public_id, context.label)
+            )
+            try:
+                await transport_handler(scope, receive, send)
+            finally:
+                request_actor.reset(token)
+
+    async def health(request):
+        return JSONResponse({"ok": True, "versao": __version__})
+
+    async def unavailable(request):
+        return JSONResponse({"erro": "Não encontrado."}, status_code=404)
+
+    class StaticHandler:
+        def __init__(self):
+            self.files = StaticFiles(directory=Path(__file__).parent / "auth" / "static")
+
+        async def __call__(self, scope, receive, send):
+            child = dict(scope)
+            child["path"] = "/" + scope["path_params"]["path"]
+            child["root_path"] = ""
+            await self.files(child, receive, send)
+
+    routes = [
+        *oauth_routes(deps),
+        Route("/mcp", MCPHandler(), methods=["POST"]),
+        Route("/saude", health, methods=["GET"]),
+        Route("/static/{path:path}", StaticHandler(), methods=["GET"]),
+        *extra_routes,
+        # Reservas negam acesso e mantêm a política completa verificável antes da T11/T18.
+        Route("/api/painel/{path:path}", unavailable, methods=["GET", "POST"]),
+        Route("/painel/{path:path}", unavailable, methods=["GET", "POST"]),
+    ]
+    policy = RoutePolicy.default()
+    policy.check_against(routes)
+
+    @asynccontextmanager
+    async def lifespan(app):
+        def migrate():
+            conn = connect()
+            try:
+                db.migrate(conn)
+            finally:
+                conn.close()
+
+        await anyio.to_thread.run_sync(migrate)
+        async with transport.router.lifespan_context(transport):
+            yield
+
+    inner = Starlette(routes=routes, lifespan=lifespan)
+    inner.router.redirect_slashes = False
+    inner.state.oauth_deps = deps
+    inner.state.mcp_server = server
+    inner.state.dispatch_tool = dispatch
+    app = EdgeMiddleware(inner, config=config, routes=policy)
+    app.state = inner.state
+    app.router = inner.router
+    return app
+
+
+def serve(config):
+    """T12: banco deve existir (init); chave vem da credencial systemd, nunca do banco."""
+    app = create_app(config, Keyring(load_master_key()), db_path=config.data_dir / "batataswap.db")
+    uvicorn.run(
+        app,
+        host=config.bind_host,
+        port=config.port,
+        server_header=False,
+        proxy_headers=False,
+        forwarded_allow_ips="",
+        access_log=False,
+        limit_concurrency=64,
+        timeout_keep_alive=5,
+    )

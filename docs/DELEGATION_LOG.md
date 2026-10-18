@@ -52,4 +52,4 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-17 | Correções T14 (C1, C2, I1–I7, sugestões) | 3 | gpt-6.1-sol (Codex) | ok (99 testes deploy+cripto) |
 | 2026-10-18 | T11 API do painel | 2 | worker-sonnet | ok (23 testes, contrato do web/painel.js) |
 | 2026-10-18 | Revisão T11 | 2 | gpt-6-luna (Codex) | 0 crítico, 1 importante (ultima_escrita contava lixeira); corrigido pelo worker-sonnet |
-| 2026-10-18 | T10 Ferramentas MCP + app | 3 | gpt-6.1-sol (Codex) | em andamento |
+| 2026-10-18 | T10 Ferramentas MCP + app | 3 | gpt-6.1-sol (Codex) | ok (suíte passa; só 12 testes próprios — cobertura fina); revisão do worker-opus em andamento |

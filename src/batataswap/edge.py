@@ -209,6 +209,7 @@ class RoutePolicy:
                 RouteRule("GET", "/painel/*", "cookie"),
                 RouteRule("POST", "/painel/*", "form"),
                 RouteRule("GET", "/saude", "public", cors=True),
+                RouteRule("GET", "/static/*", "public", static=True),
             ]
         )
 
@@ -302,7 +303,7 @@ class EdgeMiddleware:
         is_html = content_type.split(b";", 1)[0].strip().lower() == b"text/html"
         out += [
             (b"x-content-type-options", b"nosniff"),
-            (b"referrer-policy", b"no-referrer"),
+            (b"referrer-policy", b"same-origin" if is_html else b"no-referrer"),
             (b"x-frame-options", b"DENY"),
             (b"strict-transport-security", b"max-age=31536000"),
             (b"content-security-policy", self._page_csp if is_html else _API_CSP.encode()),
