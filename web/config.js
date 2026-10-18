@@ -2,6 +2,6 @@
 // (ex.: "https://servidor.tailnet.ts.net", sem barra no fim).
 // Vazio = modo demonstração, com dados de mentira.
 // Scripts clássicos: estas constantes viram globais para os outros arquivos.
-const API_ORIGIN = "";
+const API_ORIGIN = "https://batatarp.tail0512bc.ts.net";
 const CLIENT_ID = "painel-vercel";
 const REDIRECT_URI = location.origin + "/callback";
