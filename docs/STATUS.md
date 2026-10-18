@@ -7,6 +7,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 
 ## Pronto
 
+- **T13b (ensaio real) OK em 2026-10-18**: conectores nas DUAS contas (web e app do celular), login senha+TOTP, salvar_contexto + anexar_mensagens na conta-1, buscar_contexto + ler_conversa na conta-2 ("salvo pela conta-1"), e as ferramentas aparecem também no Claude Code web. Funnel ligado no batatarp (ensaio estendido, só dado de teste).
 - T10: ferramentas MCP + app.py (painel plugado), revisado e corrigido. 670 testes.
 - T14 com o Davi: instalado (fb1d8ac), `public_origin` configurado, key-init feito (**a chave mestra apareceu no chat; o Davi recusou gerar outra — risco aceito por ele**), init feito (senha + TOTP), `batataswap.service` ativo e `/saude` ok localmente. Próximo: atualizar pro SHA 768645325810610f89aa2478fab2e88c0fe1dbbb e ensaio T13b (Funnel temporário, só conta-1). T16 (revisão nível 4) iniciada sobre esse SHA.
 - T15: interface da Vercel em `web/` (modo demo; `API_ORIGIN_AQUI` em `config.js` e no CSP do `vercel.json` a trocar pela origem real). Revisada pelo gpt-6.1-sol, correções aplicadas.
@@ -54,7 +55,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 ## Pendências
 
 - Chave mestra exposta: o Davi decidiu **não recriar** (2026-10-18). Risco aceito por ele.
-- Produção: servidor em a6fb1e9 + TOML corrigido (tool_response_chars=140000); serviço ativo. Funnel ligado mas inacessível de fora (TLS falha) — investigando com o Davi.
+- Produção: servidor em a6fb1e9 + TOML corrigido (tool_response_chars=140000); serviço ativo. Funnel reaplicado (`funnel reset` + `--bg`) e acessível.
 - T16 2ª passada perdida no reinício do container (astra e opus); relançar.
 
 - **Decisões do Davi pedidas pela T16:** (I10) recriar chave mestra, senha e TOTP depois do ensaio (a chave apareceu no chat) — recomendado; (I8) aceitar por escrito o risco residual de preferência envenenada por injeção; (I9) aceitar ou não ligar o painel da Vercel (`vercel_origin`) sabendo do risco de phishing.

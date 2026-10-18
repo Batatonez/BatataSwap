@@ -355,11 +355,11 @@ um reenvio de lote antigo após migrar pode duplicá-las. Novas chaves ficam som
 
 O serve usa h11, sem WebSocket, com `limit_concurrency=512`. A borda valida o Bearer
 no RS antes de ler o corpo de `/mcp` e `/api/painel/*`. Leituras sem Bearer validado
-usam pools separados: `/oauth/token` tem 8 vagas, 4 KiB e prazo de 2 s;
+usam pools separados: `/oauth/token` tem 8 vagas, Content-Length obrigatório (sem chunked), 4 KiB e prazo total de 1 s;
 `/oauth/login` e `/oauth/consent` compartilham 8 vagas, 8 KiB e 3 s; o resto tem
-4 vagas, até 8 KiB e 3 s. Excesso recebe 503 imediato com `Retry-After: 1`.
+4 vagas, até 8 KiB e 3 s. A espera por vaga dura até 2 s; depois recebe 503 com `Retry-After: 1`.
 GET/HEAD sem corpo (Content-Length ausente ou zero e sem Transfer-Encoding) não
-ocupam vagas de corpo. Saturar o pool de `/oauth/token` pode atrasar renovações:
+ocupam vagas de corpo; GET/HEAD com corpo recebem 400. Saturar o pool de `/oauth/token` pode atrasar renovações:
 o Claude refaz o refresh e, no pior caso, o Davi reconecta. DoS volumétrico residual é aceito: conexões antes dos headers, saturação
 das 512 conexões, banda e recursos do Funnel ainda podem impedir acesso legítimo.
 Esses limites não substituem proteção volumétrica externa.
@@ -367,3 +367,13 @@ Esses limites não substituem proteção volumétrica externa.
 Use `sudo batataswap-admin preferencias` para listar id, data, origem e texto das
 preferências vivas no terminal (`--pty`). Use `sudo batataswap-admin expurgar <id>`
 para expurgo definitivo via `memory.purge`, com ator `cli` (`--pipe`).
+
+
+O cookie de dispositivo com `SameSite=Lax` só escolhe o orçamento de tentativas de login;
+não autentica o usuário nem dispensa senha e TOTP. Um cookie ausente ou inválido usa o
+orçamento anônimo.
+
+O prazo para headers parciais é uma proteção local do servidor HTTP/proxy. A borda ASGI
+só recebe a requisição depois dos headers completos e limita o prazo do corpo; ela não
+consegue interromper um cliente que ainda está enviando headers. Configure e verifique
+esse prazo no ponto de entrada local, inclusive no caminho do Funnel.
