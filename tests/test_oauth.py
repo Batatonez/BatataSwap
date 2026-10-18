@@ -589,7 +589,6 @@ def test_code_exchange_happy(env):
         ({"code_verifier": None}, "invalid_request"),
         ({"redirect_uri": "https://claude.ai/outro"}, "invalid_grant"),
         ({"redirect_uri": None}, "invalid_request"),
-        ({"resource": None}, "invalid_target"),
         ({"resource": ORIGIN + "/api/painel"}, "invalid_target"),
         ({"client_id": "https://evil.example/x"}, "invalid_client"),
         ({"client_id": "painel-vercel", "resource": ORIGIN + "/api/painel"}, "invalid_grant"),
@@ -796,15 +795,16 @@ def test_refresh_reuse_revokes_family(env):
 
 def test_refresh_concurrent_single_winner(env):
     tokens = claude_tokens(env)
-    barrier = threading.Barrier(3)
+    barrier = threading.Barrier(2)
     results = []
+    winners = []
 
     def worker():
         conn = env.connect()
         try:
             barrier.wait()
             try:
-                oauth.token_request(
+                issued = oauth.token_request(
                     conn,
                     env.config,
                     {
@@ -814,22 +814,22 @@ def test_refresh_concurrent_single_winner(env):
                     },
                     NOW + 50,
                 )
+                winners.append(issued)
                 results.append("ok")
             except oauth.OAuthError as error:
                 results.append(error.error)
         finally:
             conn.close()
 
-    threads = [threading.Thread(target=worker) for _ in range(3)]
+    threads = [threading.Thread(target=worker) for _ in range(2)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
     assert results.count("ok") == 1
-    # Os outros viram reuso: a família inteira cai (inclusive o par do vencedor).
-    assert (
-        env.conn.execute("SELECT count(*) FROM oauth_tokens WHERE revoked_at IS NULL").fetchone()[0]
-        == 0
+    assert results.count("invalid_grant") == 1
+    assert oauth.validate_bearer(
+        env.conn, winners[0].access_token, env.config.mcp_resource, "memoria", NOW + 51
     )
 
 
@@ -1029,3 +1029,59 @@ def test_known_transaction_isolation(env):
         ).fetchone()[0]
         == 2
     )
+
+
+def test_code_exchange_resource_optional(env):
+    verifier, challenge = pkce()
+    code, _ = make_code(env, claude_params(challenge))
+    assert exchange(env, code, verifier, resource=None).access_token
+
+
+@pytest.mark.parametrize("delay,consume_successor", [(60, False), (61, False), (1, True)])
+def test_refresh_grace_boundary(env, delay, consume_successor):
+    original = claude_tokens(env)
+    winner = refresh(env, original.refresh_token, NOW + 10)
+    if consume_successor:
+        winner = refresh(env, winner.refresh_token, NOW + 11)
+    with pytest.raises(oauth.OAuthError, match="invalid_grant"):
+        refresh(env, original.refresh_token, NOW + 10 + delay)
+    if delay <= 60 and not consume_successor:
+        assert oauth.validate_bearer(
+            env.conn, winner.access_token, env.config.mcp_resource, "memoria", NOW + 71
+        )
+    else:
+        with pytest.raises(oauth.BearerError):
+            oauth.validate_bearer(
+                env.conn, winner.access_token, env.config.mcp_resource, "memoria", NOW + 71
+            )
+
+
+def test_pending_cap_preserves_authenticated(env):
+    _, challenge = pkce()
+    req = oauth.validate_authorize(
+        env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW
+    )
+    tx = oauth.create_transaction(env.conn, env.keyring, req, None, NOW, 2)
+    loaded = oauth.load_transaction(
+        env.conn, env.config, env.keyring, tx.tx_id, tx.browser, tx.csrf, NOW, check_csrf=True
+    )
+    assert oauth.mark_authenticated(env.conn, loaded, NOW)
+    for _ in range(10):
+        oauth.create_transaction(env.conn, env.keyring, req, None, NOW, 2)
+    assert oauth.load_transaction(
+        env.conn, env.config, env.keyring, tx.tx_id, tx.browser, tx.csrf, NOW, check_csrf=True
+    ).authenticated
+
+
+def test_unknown_credentials_do_not_acquire_write_lock(env):
+    statements = []
+    env.conn.set_trace_callback(statements.append)
+    try:
+        with pytest.raises(oauth.OAuthError, match="invalid_grant"):
+            exchange(env, "x" * 43, "v" * 43)
+        with pytest.raises(oauth.OAuthError, match="invalid_grant"):
+            refresh(env, "bsw_rt_" + "x" * 43, NOW)
+        oauth.revoke_token(env.conn, env.config, {"token": ["bsw_at_" + "x" * 43]}, NOW)
+    finally:
+        env.conn.set_trace_callback(None)
+    assert not any(statement.startswith("BEGIN") for statement in statements)

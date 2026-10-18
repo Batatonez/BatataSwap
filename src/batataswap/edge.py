@@ -1,6 +1,6 @@
 """Borda HTTP: middleware ASGI que nega por padrão e fica na frente de tudo (§8).
 
-A borda não valida token (isso é do RS, T08). Ela decide, por rota, que credencial é
+A borda chama o validador do RS antes de ler corpos protegidos. Ela decide que credencial é
 exigida e recusa cedo o que nem tem a forma certa. Ordem das checagens:
 
 0. limpa o escopo (headers de proxy, client, scheme) e recusa Host duplicado;
@@ -8,7 +8,7 @@ exigida e recusa cedo o que nem tem a forma certa. Ordem das checagens:
    (caminho estranho → 400, rota inexistente → 404, método fora da rota → 405)
 2. CORS/preflight, antes de qualquer credencial;
 3. Origin em métodos que mudam estado;
-4. presença e forma da credencial (Bearer ou cookie);
+4. presença e forma da credencial; validação do Bearer pelo RS;
 5. corpo contado em streaming;
 6. headers de segurança em toda resposta, inclusive nos erros da própria borda.
 
@@ -229,6 +229,7 @@ _ERRORS = {
     408: _json("Prazo de leitura do corpo excedido."),
     413: _json("Corpo da requisição grande demais."),
     421: _json("Host não reconhecido."),
+    503: _json("Muitas leituras em andamento."),
     500: _json("Erro interno."),
 }
 
@@ -241,11 +242,14 @@ class EdgeMiddleware:
         config: Config,
         routes: RoutePolicy,
         on_event: Callable[[str, int], None] | None = None,
+        bearer_validator=None,
         body_total_timeout: float = 10,
         body_idle_timeout: float = 5,
     ):
         if not isinstance(config, Config) or not isinstance(routes, RoutePolicy):
             raise TypeError("EdgeMiddleware: config e routes são obrigatórios.")
+        self.bearer_validator = bearer_validator
+        self._body_slots = asyncio.Semaphore(16)
         self.app = app
         self.body_total_timeout = body_total_timeout
         self.body_idle_timeout = body_idle_timeout
@@ -448,7 +452,7 @@ class EdgeMiddleware:
         if not self._origin_ok(rule, method, origins):
             return await self._send_error(send, 403, "origem_recusada")
 
-        # 4. Credencial: só presença e forma. Quem valida o token é o RS (T08).
+        # 4. Presença e forma; o validador injetado do RS valida antes do corpo.
         if rule.category.startswith("bearer:"):
             auths = values(b"authorization")
             match = _BEARER.fullmatch(auths[0].decode("latin-1")) if len(auths) == 1 else None
@@ -462,6 +466,20 @@ class EdgeMiddleware:
                     extra=[(b"www-authenticate", self._www_auth[rule.category])],
                 )
             state["bearer"] = match.group(1)
+            if self.bearer_validator is not None:
+                from batataswap.auth.oauth import BearerError
+
+                try:
+                    await self.bearer_validator(scope, rule.category.split(":")[1])
+                except BearerError as error:
+                    return await self._send_error(
+                        send,
+                        error.status,
+                        "credencial_ausente",
+                        cors=cors,
+                        cors_origin=cors_origin,
+                        extra=[(b"www-authenticate", error.www_authenticate.encode())],
+                    )
         elif rule.category == "cookie" and not self._has_session_cookie(values(b"cookie")):
             return await self._send_error(
                 send, 401, "credencial_ausente", cors=cors, cors_origin=cors_origin
@@ -474,6 +492,8 @@ class EdgeMiddleware:
             limit = OTHER_BODY_BYTES
         else:
             limit = self.config.limits.unauthenticated_mcp_body_bytes
+        if not rule.category.startswith("bearer:"):
+            limit = min(limit, 8192)
         lengths = values(b"content-length")
         if len(lengths) > 1 or (
             lengths and not _CONTENT_LENGTH.fullmatch(lengths[0].decode("latin-1"))
@@ -486,14 +506,37 @@ class EdgeMiddleware:
                 send, 413, "corpo_grande", cors=cors, cors_origin=cors_origin
             )
 
-        await self._forward(scope, receive, send, rule, limit, cors_origin)
+        anonymous = not rule.category.startswith("bearer:")
+        if anonymous:
+            if self._body_slots.locked():
+                return await self._send_error(
+                    send, 503, "requisicao_invalida", cors=cors, cors_origin=cors_origin
+                )
+            # Sem espera: no mesmo loop, acquire com vaga livre não suspende.
+            await self._body_slots.acquire()
+        released = False
 
-    async def _forward(self, scope, receive, send, rule, limit, cors_origin):
+        def release():
+            nonlocal released
+            if anonymous and not released:
+                self._body_slots.release()
+                released = True
+
+        try:
+            await self._forward(scope, receive, send, rule, limit, cors_origin, release)
+        finally:
+            release()
+
+    async def _forward(self, scope, receive, send, rule, limit, cors_origin, release):
         # O corpo inteiro é lido e contado ANTES de chamar o app: com corpo grande demais o
         # handler nem roda, então nenhum efeito dele acontece. Os tetos são pequenos (≤ 256 KiB).
         chunks: list[bytes] = []
         received = 0
-        deadline = asyncio.get_running_loop().time() + self.body_total_timeout
+        timeout = self.body_total_timeout
+        if not rule.category.startswith("bearer:"):
+            limit = min(limit, 8192)
+            timeout = min(timeout, 3)
+        deadline = asyncio.get_running_loop().time() + timeout
         while True:
             try:
                 remaining = deadline - asyncio.get_running_loop().time()
@@ -522,6 +565,7 @@ class EdgeMiddleware:
             if not message.get("more_body", False):
                 break
 
+        release()
         replayed = False
         started = False
 

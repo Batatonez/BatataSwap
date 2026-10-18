@@ -150,7 +150,9 @@ def test_serve_options(env, monkeypatch):
             "proxy_headers": False,
             "forwarded_allow_ips": "",
             "access_log": False,
-            "limit_concurrency": 64,
+            "limit_concurrency": 512,
+            "http": "h11",
+            "ws": "none",
             "timeout_keep_alive": 5,
             "timeout_graceful_shutdown": 15,
             "h11_max_incomplete_event_size": 16384,
@@ -272,8 +274,8 @@ def test_panel_routes_integrated(env):
             verify_totp_only(
                 env.conn, env.keyring, app.state.oauth_deps.budget, "000000", None, NOW
             ).status
-            == "trancado"
-        )
+            == "invalido"
+        )  # o painel tem orçamento próprio: o do login global continua livre
 
 
 def test_mcp_edge_guards(env, monkeypatch):

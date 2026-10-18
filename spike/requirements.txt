@@ -1,3 +1,0 @@
-mcp>=2.2,<3
-uvicorn[standard]
-starlette

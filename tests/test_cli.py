@@ -324,6 +324,7 @@ def test_trash_restore_cascade_cli(setup_cli, capsys):
     assert all(
         secret not in output for secret in ["NOME-SECRETO", "FIO-SECRETO", "CONTEUDO-SECRETO"]
     )
+    assert cli.main(["restaurar", context], config=config) == 1
     assert cli.main(["restaurar", project], config=config) == 0
     for table in ["projects", "conversations", "messages"]:
         assert conn.execute(f"SELECT trashed_at FROM {table}").fetchone() == (None,)
@@ -334,4 +335,31 @@ def test_trash_restore_cascade_cli(setup_cli, capsys):
         (None,),
         (None,),
     ]
+    conn.close()
+
+
+def test_preferences_and_purge_cli(setup_cli, capsys):
+    from batataswap import memory
+    from tests.test_memory import _grant
+
+    config = setup_cli
+    conn = db.connect(config.data_dir / "batataswap.db")
+    conn.execute("INSERT INTO oauth_clients VALUES (1,'client','static','{}',0,0)")
+    actor = _grant(conn, "grant_aaaaaaaaaaaaaaaa", "conta-1")
+    keyring = crypto.Keyring(crypto.load_master_key())
+    now = int(cli.time.time())
+    ids = [
+        memory.add_preference(conn, keyring, config.limits, actor, f"texto {i}", now=now)["id"]
+        for i in range(21)
+    ]
+    capsys.readouterr()
+    assert cli.main(["preferencias"], config=config) == 0
+    output = capsys.readouterr().out
+    assert all(pid in output for pid in ids)
+    assert "texto 20" in output and "conta-1" in output and memory.iso(now) in output
+    assert cli.main(["expurgar", ids[0]], config=config) == 0
+    assert conn.execute(
+        "SELECT text_ct FROM preferences WHERE public_id=?", (ids[0],)
+    ).fetchone() == (None,)
+    assert conn.execute("SELECT grant_id FROM audit WHERE event='expurgar'").fetchone() == (None,)
     conn.close()

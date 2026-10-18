@@ -116,9 +116,11 @@ def _activity(conn, deps: OAuthDeps, now: int) -> dict:
     }
 
 
-def _revoke(conn, deps: OAuthDeps, label: str, code: str, now: float):
-    """Confere o TOTP (mesmo orçamento e consumo atômico do login) e revoga o grant ativo."""
-    result = verify_totp_only(conn, deps.keyring, deps.budget, code, None, now)
+def _revoke(conn, deps: OAuthDeps, label: str, code: str, now: float, panel_grant: str):
+    """Confere TOTP com orçamento próprio por grant do painel e consumo atômico."""
+    result = verify_totp_only(
+        conn, deps.keyring, deps.panel_budget, code, None, now, budget_key=panel_grant
+    )
     if not result.ok:
         return result.status, result.retry_after
     row = conn.execute(
@@ -151,7 +153,7 @@ def _parse_revoke(raw: bytes, content_type: str) -> tuple[str, str] | None:
 def panel_routes(deps: OAuthDeps) -> list[Route]:
     async def authorized(request: Request):
         try:
-            await bearer_context(deps, request.scope, "painel")
+            request.state.panel_context = await bearer_context(deps, request.scope, "painel")
         except oauth.BearerError as error:
             return bearer_error_response(error)
         return None
@@ -175,7 +177,15 @@ def panel_routes(deps: OAuthDeps) -> list[Route]:
         if parsed is None:
             return _json({"erro": "pedido inválido"}, 400)
         label, code = parsed
-        status, retry = await _db(deps, _revoke, deps, label, code, deps.clock())
+        status, retry = await _db(
+            deps,
+            _revoke,
+            deps,
+            label,
+            code,
+            deps.clock(),
+            request.state.panel_context.grant_public_id,
+        )
         if status == "ok":
             return Response(status_code=204, headers=_NO_STORE)
         if status == "trancado":

@@ -53,6 +53,7 @@ def main(
         "restore-test",
         "grants",
         "lixeira",
+        "preferencias",
         "unlock",
         "cleanup",
     ):
@@ -62,6 +63,7 @@ def main(
     key_parser.add_argument("--banco-sera-perdido", action="store_true")
     commands.add_parser("restore").add_argument("arquivo", type=Path)
     commands.add_parser("restaurar").add_argument("id")
+    commands.add_parser("expurgar").add_argument("id")
     commands.add_parser("revoke").add_argument("rotulo")
     commands.add_parser("export").add_argument("--out", required=True)
     commands.add_parser("wipe").add_argument("--incluir-backups", action="store_true")
@@ -171,6 +173,29 @@ def main(
                 print("Aviso: exportação em texto puro, sem cifra.", file=sys.stderr)
                 payload = json.dumps(memory.export_all(conn, keyring), ensure_ascii=False)
                 print(payload)
+            elif command == "preferencias":
+                print("id\tdata\torigem\ttexto")
+                cursor = None
+                while True:
+                    page = memory.list_preferences(
+                        conn, keyring, memory.Actor(None, None, "cli"), cursor, now=now
+                    )
+                    for item in page["preferencias"]:
+                        origin = conn.execute(
+                            "SELECT COALESCE(g.public_id, p.source_label) FROM preferences p "
+                            "LEFT JOIN oauth_grants g ON g.id=p.grant_id WHERE p.public_id=?",
+                            (item["id"],),
+                        ).fetchone()[0]
+                        print(
+                            f"{item['id']}\t{item['salvo_em']}\t"
+                            f"{origin} ({item['enviado_por'] or 'cli'})\t{item['texto']}"
+                        )
+                    cursor = page["proximo_cursor"]
+                    if cursor is None:
+                        break
+            elif command == "expurgar":
+                purged = memory.purge(conn, memory.Actor(None, None, "cli"), args.id, now=now)
+                print(json.dumps(purged, ensure_ascii=False))
             elif command == "restaurar":
                 restored = memory.restore(conn, memory.Actor(None, None, "cli"), args.id, now=now)
                 print(json.dumps(restored, ensure_ascii=False))

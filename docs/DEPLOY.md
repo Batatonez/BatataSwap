@@ -53,7 +53,7 @@ sudoedit /etc/batataswap/batataswap.toml
 
 Troque `SEU-TAILNET` no `public_origin` pelo nome real, em minúsculas, sem barra final
 nem `:443`. Mantenha `bind_host = "127.0.0.1"`, porta 8780 e os caminhos padrão.
-Mantenha a lista CIMD do Claude e `allowed_mcp_origins = []` (o spike não enviou Origin).
+Mantenha a lista CIMD do Claude e `allowed_mcp_origins = []` (o Claude não enviou Origin na integração).
 A origem da Vercel é opcional: só descomente com a origem HTTPS exata já publicada.
 Configure também essa mesma origem da API em `web/config.js` e no CSP da Vercel,
 na tarefa de integração do painel; nunca envie conteúdo de memória para a Vercel.
@@ -349,3 +349,17 @@ Ambos usam `--pipe`. Este comando é diferente de `restore`, que recupera um bac
 A migração 0003 invalida as chaves antigas de idempotência de lotes, pois a migração
 SQL não tem acesso à chave mestra para convertê-las em HMAC. Mensagens são preservadas;
 um reenvio de lote antigo após migrar pode duplicá-las. Novas chaves ficam somente como HMAC.
+
+
+### Limites de conexões e administração da memória
+
+O serve usa h11, sem WebSocket, com `limit_concurrency=512`. A borda valida o Bearer
+no RS antes de ler o corpo de `/mcp` e `/api/painel/*`. Leituras sem Bearer validado
+têm 16 vagas independentes (excesso recebe 503 imediato), até 8 KiB e prazo total de
+3 segundos. DoS volumétrico residual é aceito: conexões antes dos headers, saturação
+das 512 conexões, banda e recursos do Funnel ainda podem impedir acesso legítimo.
+Esses limites não substituem proteção volumétrica externa.
+
+Use `sudo batataswap-admin preferencias` para listar id, data, origem e texto das
+preferências vivas no terminal (`--pty`). Use `sudo batataswap-admin expurgar <id>`
+para expurgo definitivo via `memory.purge`, com ator `cli` (`--pipe`).

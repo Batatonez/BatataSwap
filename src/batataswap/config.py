@@ -97,7 +97,7 @@ class Config:
     backup_dir: Path = Path("/var/backups/batataswap")
     vercel_origin: str | None = None
     painel_client_id: str = "painel-vercel"
-    # client_id do CIMD do Claude hospedado, medido no spike (ARQUITETURA §1.0 e §4.1).
+    # client_id do CIMD do Claude hospedado, validado na integração (ARQUITETURA §1.0 e §4.1).
     allowed_cimd_client_ids: tuple[str, ...] = field(
         default_factory=lambda: (CLAUDE_CIMD_CLIENT_ID,)
     )

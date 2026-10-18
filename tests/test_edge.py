@@ -10,6 +10,7 @@ from starlette.routing import Mount, Route, WebSocketRoute
 
 from batataswap.config import Config
 from batataswap.edge import EVENTS, EdgeMiddleware, RoutePolicy, RouteRule
+from tests.test_oauth import NOW, claude_tokens, env  # noqa: F401
 
 ORIGIN = "https://batatarp.exemplo.ts.net"
 HOST = "batatarp.exemplo.ts.net"
@@ -995,10 +996,85 @@ def test_body_deadlines(slow):
             sent.append(message)
 
         await edge._forward(
-            {}, receive, send, RoutePolicy.default().for_path("/saude")[0], 10000, None
+            {},
+            receive,
+            send,
+            RoutePolicy.default().for_path("/saude")[0],
+            10000,
+            None,
+            lambda: None,
         )
         assert sent[0]["status"] == 408
         assert (b"connection", b"close") in sent[0]["headers"]
         assert toy.calls == 0
+
+    asyncio.run(run())
+
+
+def test_slowloris_64_anonymous_readers_preserves_bearer(env):  # noqa: F811
+    access = claude_tokens(env).access_token
+
+    async def run():
+        edge, toy = make()
+        entered = 0
+        full = asyncio.Event()
+        unblock = asyncio.Event()
+        validated = []
+
+        async def validator(scope, which):
+            from batataswap.auth.oauth import validate_bearer
+
+            validated.append(which)
+            return validate_bearer(
+                env.conn, scope["state"]["bearer"], env.config.mcp_resource, "memoria", NOW
+            )
+
+        edge.bearer_validator = validator
+
+        async def request(path, token=None, slow=False):
+            nonlocal entered
+            messages = []
+            headers = [(b"host", HOST.encode())]
+            if token:
+                headers.append((b"authorization", ("Bearer " + token).encode()))
+            scope = {
+                "type": "http",
+                "method": "POST",
+                "path": path,
+                "raw_path": path.encode(),
+                "headers": headers,
+                "query_string": b"",
+            }
+
+            async def receive():
+                nonlocal entered
+                if slow:
+                    entered += 1
+                    if entered == 16:
+                        full.set()
+                    await unblock.wait()
+                return {"type": "http.request", "body": b"{}", "more_body": False}
+
+            async def send(message):
+                messages.append(message)
+
+            await edge(scope, receive, send)
+            return next(m["status"] for m in messages if m["type"] == "http.response.start")
+
+        readers = [asyncio.create_task(request("/oauth/token", slow=True)) for _ in range(64)]
+        await asyncio.wait_for(full.wait(), 1)
+        await asyncio.sleep(0)
+        assert sum(t.done() for t in readers) == 48
+        assert await asyncio.wait_for(request("/mcp", access), 1) == 200
+        # Bearer com formato válido, porém desconhecido, não chega a ler o corpo.
+        assert await asyncio.wait_for(request("/mcp", "B" * 32, slow=True), 1) == 401
+        assert validated == ["mcp", "mcp"]
+        assert entered == 16
+        unblock.set()
+        statuses = await asyncio.gather(*readers)
+        assert statuses.count(503) == 48
+        assert statuses.count(200) == 16
+        assert edge._body_slots._value == 16
+        assert toy.calls == 17
 
     asyncio.run(run())

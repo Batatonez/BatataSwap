@@ -144,6 +144,9 @@ def _validate(value, schema):
         props = schema["properties"]
         if set(value) - set(props) or set(schema["required"]) - set(value):
             raise mem.InvalidInput("Parâmetros inválidos: confira os campos obrigatórios.")
+        for key in list(value):
+            if value[key] is None and key not in schema["required"]:
+                del value[key]
         for key, item in value.items():
             try:
                 _validate(item, props[key])

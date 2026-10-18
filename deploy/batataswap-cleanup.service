@@ -1,4 +1,5 @@
 [Unit]
+OnFailure=batataswap-alerta@%n.service
 Description=BatataSwap cleanup
 StartLimitIntervalSec=300
 StartLimitBurst=10
@@ -39,6 +40,5 @@ SystemCallFilter=@system-service
 CapabilityBoundingSet=
 UMask=0077
 MemoryMax=512M
-ReadWritePaths=/var/backups/batataswap
 SyslogIdentifier=batataswap
 ExecStart=/opt/batataswap/.venv/bin/python -m batataswap cleanup

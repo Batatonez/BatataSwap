@@ -50,7 +50,6 @@ REQUIRED = {
     "CapabilityBoundingSet": "",
     "UMask": "0077",
     "MemoryMax": "512M",
-    "ReadWritePaths": "/var/backups/batataswap",
     "SyslogIdentifier": "batataswap",
 }
 
@@ -73,6 +72,10 @@ def test_service_contract(path):
     unit = parse_unit(path)
     for key, value in REQUIRED.items():
         assert unit["Service", key] == value
+    if path.name in {"batataswap-backup.service", "batataswap-restore-test.service"}:
+        assert unit["Service", "ReadWritePaths"] == "/var/backups/batataswap"
+    else:
+        assert ("Service", "ReadWritePaths") not in unit
     assert not any(key in {"IPAddressDeny", "IPAddressAllow"} for _, key in unit)
     assert unit["Unit", "StartLimitIntervalSec"] == "300"
     assert unit["Unit", "StartLimitBurst"] == "10"
@@ -91,7 +94,7 @@ def test_service_contract(path):
         assert unit["Service", "PrivateNetwork"] == "yes"
         assert unit["Service", "RestrictAddressFamilies"] == "AF_UNIX"
         assert ("Unit", "After") not in unit
-        if command in {"backup", "restore-test"}:
+        if command in {"backup", "restore-test", "cleanup"}:
             assert unit["Unit", "OnFailure"] == "batataswap-alerta@%n.service"
 
 
@@ -135,6 +138,8 @@ def test_admin_allowlist(tmp_path):
         "wipe",
         "grants",
         "lixeira",
+        "preferencias",
+        "expurgar",
         "restaurar",
         "revoke",
         "unlock",
@@ -272,3 +277,11 @@ def test_alert_unit():
     assert unit["Service", "SyslogLevel"] == "crit"
     assert unit["Service", "StandardOutput"] == "journal"
     assert unit["Service", "ExecStart"].startswith("/usr/bin/echo ")
+
+
+def test_admin_preferences_pty_and_purge_pipe():
+    script = (DEPLOY / "batataswap-admin").read_text()
+    terminal_cases = script.split("terminal=(--pipe)", 1)[1].split("exec systemd-run", 1)[0]
+    assert "preferencias)" in terminal_cases
+    assert "expurgar" not in terminal_cases
+    assert "terminal=(--pty -E TERM)" in terminal_cases

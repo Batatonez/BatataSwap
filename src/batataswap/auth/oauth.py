@@ -408,7 +408,7 @@ def create_transaction(
         )
         conn.execute(
             "DELETE FROM oauth_transactions WHERE rowid IN (SELECT rowid FROM oauth_transactions "
-            "WHERE device_key IS ? ORDER BY expires_at DESC, rowid DESC LIMIT -1 OFFSET ?)",
+            "WHERE device_key IS ? AND authenticated_at IS NULL ORDER BY expires_at DESC, rowid DESC LIMIT -1 OFFSET ?)",
             (device_key, max_pending - 1),
         )
         conn.execute(
@@ -722,12 +722,14 @@ def _exchange_code(conn, config: Config, params, now: int) -> TokenResponse:
     client_id, policy = _client_policy(config, params)
     if code is None or redirect_uri is None or verifier is None:
         raise _err("invalid_request", "parametros obrigatorios ausentes")
-    if resource is None or resource != policy.resource:
+    if resource is not None and resource != policy.resource:
         raise _err("invalid_target", "resource invalido para este cliente")
     if not _opaque(code):
         raise _err("invalid_grant", "codigo invalido ou expirado")
     code_hash = token_hash(code)
     reused = None
+    if conn.execute("SELECT 1 FROM oauth_codes WHERE code_hash=?", (code_hash,)).fetchone() is None:
+        raise _err("invalid_grant", "credencial invalida ou expirada")
     with write_transaction(conn):
         row = conn.execute(
             "SELECT o.grant_id, o.redirect_uri, o.resource, o.code_challenge, o.expires_at, "
@@ -757,7 +759,7 @@ def _exchange_code(conn, config: Config, params, now: int) -> TokenResponse:
             raise _err("invalid_grant", "codigo emitido para outro cliente")
         if code_redirect != redirect_uri or redirect_uri != policy.redirect_uri:
             raise _err("invalid_grant", "redirect_uri nao confere")
-        if code_resource != resource:
+        if resource is not None and code_resource != resource:
             raise _err("invalid_target", "resource nao confere")
         if not _pkce_ok(verifier, challenge):
             raise _err("invalid_grant", "PKCE invalido")
@@ -815,6 +817,13 @@ def _refresh(conn, config: Config, params, now: int) -> TokenResponse:
         raise _err("invalid_grant", "refresh invalido ou expirado")
     refresh_hash = token_hash(refresh)
     reused = False
+    if (
+        conn.execute(
+            "SELECT 1 FROM oauth_tokens WHERE token_hash=? AND kind='refresh'", (refresh_hash,)
+        ).fetchone()
+        is None
+    ):
+        raise _err("invalid_grant", "credencial invalida ou expirada")
     with write_transaction(conn):
         row = conn.execute(
             "SELECT t.grant_id, t.family_id, t.expires_at, t.used_at, t.revoked_at, "
@@ -842,7 +851,14 @@ def _refresh(conn, config: Config, params, now: int) -> TokenResponse:
         if grant_client != client_id:
             raise _err("invalid_grant", "refresh emitido para outro cliente")
         if used_at is not None:
-            # Reuso: revoga a família inteira e o grant; o Davi reconecta (login + TOTP).
+            successor = conn.execute(
+                "SELECT s.used_at FROM oauth_tokens t JOIN oauth_tokens s "
+                "ON s.token_hash=t.successor_hash WHERE t.token_hash=?",
+                (refresh_hash,),
+            ).fetchone()
+            if now - used_at <= 60 and successor is not None and successor[0] is None:
+                raise _err("invalid_grant", "refresh ja utilizado")
+            # Reuso fora da tolerância revoga a família e o grant.
             conn.execute(
                 "UPDATE oauth_tokens SET revoked_at=? WHERE family_id=? AND revoked_at IS NULL",
                 (now, family_id),
@@ -887,9 +903,14 @@ def _refresh(conn, config: Config, params, now: int) -> TokenResponse:
                 != 1
             ):
                 raise _err("invalid_grant", "refresh invalido ou expirado")
-            return _issue(
+            issued = _issue(
                 conn, (grant_id, public_id, grant_exp), policy, family_id, None, scope_out, now
             )
+            conn.execute(
+                "UPDATE oauth_tokens SET successor_hash=? WHERE token_hash=?",
+                (token_hash(issued.refresh_token), refresh_hash),
+            )
+            return issued
     assert reused
     raise _err("invalid_grant", "refresh invalido ou expirado")
 
@@ -927,6 +948,13 @@ def revoke_token(
     except _Duplicate:
         return
     if not _opaque(token):
+        return
+    if (
+        conn.execute(
+            "SELECT 1 FROM oauth_tokens WHERE token_hash=?", (token_hash(token),)
+        ).fetchone()
+        is None
+    ):
         return
     with write_transaction(conn):
         row = conn.execute(

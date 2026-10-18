@@ -202,7 +202,7 @@ def test_oauth_security_events(env, capsys, caplog):  # noqa: F811
     tokens = exchange(env, code, verifier)
     refresh(env, tokens.refresh_token, NOW + 1)
     with pytest.raises(oauth.OAuthError):
-        refresh(env, tokens.refresh_token, NOW + 2)
+        refresh(env, tokens.refresh_token, NOW + 100)
     with pytest.raises(oauth.OAuthError):
         exchange(env, code, verifier, now=NOW + 3)
     public_id = env.conn.execute("SELECT public_id FROM oauth_grants").fetchone()[0]

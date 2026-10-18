@@ -301,15 +301,19 @@ def test_two_accounts_happy_path(server):
     assert response.headers["cache-control"] == "no-store"
     rotated = response.json()
     assert rotated["refresh_token"] != tokens1["refresh_token"]
-    # Reuso do refresh antigo derruba a família.
-    response = token(
-        browser,
-        {
-            "grant_type": "refresh_token",
-            "refresh_token": tokens1["refresh_token"],
-            "client_id": CLAUDE_CIMD_CLIENT_ID,
-        },
-    )
+    old_refresh = {
+        "grant_type": "refresh_token",
+        "refresh_token": tokens1["refresh_token"],
+        "client_id": CLAUDE_CIMD_CLIENT_ID,
+    }
+    # Reuso DENTRO da janela de 60 s (sucessor ainda não usado): invalid_grant, sem revogar.
+    server.tick(30)
+    response = token(browser, old_refresh)
+    assert response.status_code == 400 and response.json()["error"] == "invalid_grant"
+    assert mcp(browser, rotated["access_token"]).status_code == 200
+    # Reuso FORA da janela derruba a família.
+    server.tick(60)
+    response = token(browser, old_refresh)
     assert response.status_code == 400 and response.json()["error"] == "invalid_grant"
     assert mcp(browser, rotated["access_token"]).status_code == 401
     assert mcp(browser, tokens2["access_token"]).status_code == 200
@@ -597,7 +601,7 @@ def test_remember_device_cookie(server):
     cookie = response.headers["set-cookie"]
     value = re.match(rf"{DEVICE_COOKIE}=([^;]+); ", cookie).group(1)
     assert cookie == (
-        f"{DEVICE_COOKIE}={value}; Max-Age=15552000; Path=/; Secure; HttpOnly; SameSite=Strict"
+        f"{DEVICE_COOKIE}={value}; Max-Age=15552000; Path=/; Secure; HttpOnly; SameSite=Lax"
     )
     without = server.browser()
     tx, csrf, _ = authorize(without, claude_query(challenge))
@@ -898,3 +902,56 @@ def test_known_authorize_budget_and_unlock_direct(env, monkeypatch):  # noqa: F8
         assert (await authorize_direct()).status_code == 429
 
     asyncio.run(run())
+
+
+def test_invalid_authorize_does_not_spend_creation_budget(env, monkeypatch):  # noqa: F811
+    import asyncio
+    from urllib.parse import urlencode
+
+    from starlette.requests import Request
+
+    from batataswap.auth import routes
+
+    server = Server(env, creation_rate=CreationRate(1, 600))
+
+    async def direct_db(deps, fn, *args, **kwargs):
+        return fn(env.conn, *args, **kwargs)
+
+    monkeypatch.setattr(routes, "_db", direct_db)
+    _, challenge = pkce()
+
+    async def run():
+        for changes in (
+            {"client_id": "invalido"},
+            {"redirect_uri": "https://evil.test"},
+            {"response_type": "token"},
+        ):
+            query = claude_query(challenge)
+            query.update(changes)
+            req = Request(
+                {"type": "http", "headers": [], "query_string": urlencode(query).encode()}
+            )
+            assert (await routes._authorize(server.deps, req)).status_code in (302, 400)
+        req = Request(
+            {
+                "type": "http",
+                "headers": [],
+                "query_string": urlencode(claude_query(challenge)).encode(),
+            }
+        )
+        assert (await routes._authorize(server.deps, req)).status_code == 200
+        assert (await routes._authorize(server.deps, req)).status_code == 429
+
+    asyncio.run(run())
+
+
+def test_login_and_consent_fixed_warning():
+    from batataswap.auth import pages
+
+    warning = (
+        "Só continue se você acabou de pedir esta conexão no Claude. "
+        "A senha só se digita neste endereço."
+    )
+    assert warning in pages.login_page("Claude", "claude.ai", "tx", "csrf")
+    assert warning in pages.consent_page("Claude", "claude.ai", "memoria", "tx", "csrf", None, {})
+    assert warning in pages.replace_page("Claude", "claude.ai", "conta-1", "old", "tx", "csrf")

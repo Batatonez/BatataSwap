@@ -10,7 +10,7 @@ backup_dir = "/var/backups/batataswap"
 # vercel_origin = "https://SEU-PROJETO.vercel.app"
 painel_client_id = "painel-vercel"
 allowed_cimd_client_ids = ["https://claude.ai/oauth/mcp-oauth-client-metadata"]
-# No spike o Claude não enviou Origin; qualquer Origin presente será recusado.
+# Na integração o Claude não enviou Origin; qualquer Origin presente será recusado.
 allowed_mcp_origins = []
 account_labels = ["conta-1", "conta-2"]
 

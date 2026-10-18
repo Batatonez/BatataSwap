@@ -59,6 +59,7 @@ class OAuthDeps:
     budget: Budget
     slot: ScryptSlot
     fetcher: Fetcher = httpx_fetcher
+    panel_budget: Budget = field(default_factory=Budget)
     device_creation_rates: dict = field(default_factory=dict)
     creation_rate: CreationRate = field(default_factory=lambda: CreationRate(30, 600))
     clock: Callable[[], float] = time.time
@@ -133,6 +134,19 @@ def _json(data: dict) -> JSONResponse:
 
 async def _authorize(deps: OAuthDeps, request: Request) -> Response:
     now = deps.clock()
+    try:
+        params = oauth.parse_params(request.scope.get("query_string", b""))
+    except (ValueError, UnicodeError):
+        deps.emit("authorize_recusado", 400)
+        return _message("Conexão recusada", oauth.BAD_REQUEST, 400)
+    try:
+        req = await _db(deps, oauth.validate_authorize, deps.config, params, deps.fetcher, now)
+    except oauth.LocalError as error:
+        deps.emit("authorize_recusado", 400)
+        return _message("Conexão recusada", error.message, 400)
+    except oauth.RedirectError as error:
+        deps.emit("authorize_recusado", 302)
+        return RedirectResponse(error.location(), status_code=302, headers=_NO_STORE)
 
     def creation_budget(conn):
         key = owner._budget_key(conn, request.cookies.get(DEVICE_COOKIE), now)
@@ -169,20 +183,6 @@ async def _authorize(deps: OAuthDeps, request: Request) -> Response:
             429,
             {"retry-after": str(retry)},
         )
-    now = deps.clock()
-    try:
-        params = oauth.parse_params(request.scope.get("query_string", b""))
-    except (ValueError, UnicodeError):
-        deps.emit("authorize_recusado", 400)
-        return _message("Conexão recusada", oauth.BAD_REQUEST, 400)
-    try:
-        req = await _db(deps, oauth.validate_authorize, deps.config, params, deps.fetcher, now)
-    except oauth.LocalError as error:
-        deps.emit("authorize_recusado", 400)
-        return _message("Conexão recusada", error.message, 400)
-    except oauth.RedirectError as error:
-        deps.emit("authorize_recusado", 302)
-        return RedirectResponse(error.location(), status_code=302, headers=_NO_STORE)
     tx = await _db(
         deps,
         oauth.create_transaction,
@@ -266,7 +266,7 @@ async def _login(deps: OAuthDeps, request: Request) -> Response:
     if result.device_token:
         response.headers.append(
             "set-cookie",
-            _cookie(DEVICE_COOKIE, result.device_token, DEVICE_MAX_AGE, "Strict"),
+            _cookie(DEVICE_COOKIE, result.device_token, DEVICE_MAX_AGE, "Lax"),
         )
     return response
 

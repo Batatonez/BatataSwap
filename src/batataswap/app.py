@@ -165,7 +165,13 @@ def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_rout
     inner.state.oauth_deps = deps
     inner.state.mcp_server = server
     inner.state.dispatch_tool = dispatch
-    app = EdgeMiddleware(inner, config=config, routes=policy, on_event=logs.emit)
+
+    async def validate(scope, which):
+        return await bearer_context(deps, scope, which)
+
+    app = EdgeMiddleware(
+        inner, config=config, routes=policy, on_event=logs.emit, bearer_validator=validate
+    )
     app.state = inner.state
     app.router = inner.router
     return app
@@ -184,7 +190,9 @@ def serve(config):
         proxy_headers=False,
         forwarded_allow_ips="",
         access_log=False,
-        limit_concurrency=64,
+        limit_concurrency=512,
+        http="h11",
+        ws="none",
         timeout_keep_alive=5,
         timeout_graceful_shutdown=15,
         h11_max_incomplete_event_size=16384,

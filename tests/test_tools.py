@@ -554,3 +554,22 @@ def test_large_conversation_serialized_pages(connected, env):
             break
         args = {**args, "cursor": data["proximo_cursor"]}
     assert sorted(seen) == list(range(1, 41))
+
+
+def test_optional_null_is_absent():
+    from batataswap.memory import InvalidInput
+    from batataswap.tools import _validate
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "minLength": 1, "maxLength": 100},
+            "cursor": {"type": "string", "minLength": 1, "maxLength": 100},
+        },
+        "required": ["id"],
+    }
+    args = {"id": "pref_x", "cursor": None}
+    _validate(args, schema)
+    assert args == {"id": "pref_x"}
+    with pytest.raises(InvalidInput):
+        _validate({"id": None}, schema)

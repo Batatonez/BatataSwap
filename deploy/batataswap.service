@@ -42,7 +42,6 @@ SystemCallFilter=@system-service
 CapabilityBoundingSet=
 UMask=0077
 MemoryMax=512M
-ReadWritePaths=/var/backups/batataswap
 SyslogIdentifier=batataswap
 ExecStart=/opt/batataswap/.venv/bin/python -m batataswap serve
 

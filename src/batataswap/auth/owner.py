@@ -133,10 +133,12 @@ def check_login(
         slot.release()
 
 
-def verify_totp_only(conn, keyring, budget, code, device_token=None, now=None) -> LoginResult:
+def verify_totp_only(
+    conn, keyring, budget, code, device_token=None, now=None, *, budget_key=None
+) -> LoginResult:
     now = time.time() if now is None else now
     _apply_unlock(conn, budget)
-    key = _budget_key(conn, device_token, now)
+    key = budget_key if budget_key is not None else _budget_key(conn, device_token, now)
     reservation = budget.begin(key)
     if isinstance(reservation, int):
         return LoginResult("trancado", LOCKED, reservation)

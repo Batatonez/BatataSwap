@@ -61,6 +61,8 @@ def _message(message: str | None) -> str:
 def login_page(client_name: str, host: str, tx_id: str, csrf: str, message=None) -> str:
     body = (
         "<h1>Entrar</h1>\n"
+        '<p class="aviso">Só continue se você acabou de pedir esta conexão no Claude. '
+        "A senha só se digita neste endereço.</p>\n"
         f"{_who(client_name, host)}\n"
         f"{_message(message)}\n"
         '<form method="post" action="/oauth/login">\n'
@@ -127,6 +129,8 @@ def consent_page(
         )
     body = (
         "<h1>Autorizar acesso</h1>\n"
+        '<p class="aviso">Só continue se você acabou de pedir esta conexão no Claude. '
+        "A senha só se digita neste endereço.</p>\n"
         f"{_who(client_name, host)}\n"
         f"{_message(message)}\n"
         f"{_scopes(scope)}\n"
@@ -144,6 +148,8 @@ def replace_page(
 ) -> str:
     body = (
         "<h1>Substituir a conexão antiga?</h1>\n"
+        '<p class="aviso">Só continue se você acabou de pedir esta conexão no Claude. '
+        "A senha só se digita neste endereço.</p>\n"
         f"{_who(client_name, host)}\n"
         f"<p>Já existe uma conexão ativa como <strong>{escape(label)}</strong>. "
         "Se continuar, a conexão antiga é desligada e esta passa a valer no lugar dela.</p>\n"

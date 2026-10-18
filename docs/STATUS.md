@@ -26,7 +26,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - T09: **pronta** (revisada; correções aplicadas). `retry_checkpoint` deve ser chamado pela faxina (T12).
 - T07: **pronta** (revisada; correções aplicadas). Pra T10: borda é o middleware mais externo; chamar `RoutePolicy.default().check_against(app.routes)` na montagem; `/mcp` como `Route` (Mount é recusado); desligar `/docs` e `/openapi.json`; uvicorn com `server_header=False`, `proxy_headers=False`, `forwarded_allow_ips=""`.
 - T08: **pronta** (revisada pelo gpt-6-astra; correções aplicadas; migração 0002 com scope por token). Conferir na T13b, com navegador real, que o login funciona (Origin com meta referrer same-origin).
-- T03: **concluída**. Medições em ARQUITETURA §1.0 (protocolo 2026-07-28 no MCP, 2025-11-25 na descoberta, sem Origin, client_id `https://claude.ai/oauth/mcp-oauth-client-metadata`). Funnel **desligado** e spike parado (conferido de fora em 2026-10-17); conectores de teste removidos. Falta só a pasta `spike/` ser apagada do repo (fazer junto com a T14).
+- T03: **concluída**. Medições em ARQUITETURA §1.0 (protocolo 2026-07-28 no MCP, 2025-11-25 na descoberta, sem Origin, client_id `https://claude.ai/oauth/mcp-oauth-client-metadata`). Funnel **desligado** e spike parado (conferido de fora em 2026-10-17); conectores de teste removidos. Pasta `spike/` apagada na T16.
 - T05: **pronta** (revisada, correções aplicadas). Conferir na T14/T17 que o systemd entrega a credencial com dono do serviço e modo 0400 (o crypto recusa 0440/ACL).
 
 ## Decisões do Davi (2026-10-17)
@@ -55,7 +55,7 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 
 - **Decisões do Davi pedidas pela T16:** (I10) recriar chave mestra, senha e TOTP depois do ensaio (a chave apareceu no chat) — recomendado; (I8) aceitar por escrito o risco residual de preferência envenenada por injeção; (I9) aceitar ou não ligar o painel da Vercel (`vercel_origin`) sabendo do risco de phishing.
 
-- **T16: gpt-6-astra deu 'não expor'** (6 importantes, ver DELEGATION_LOG). Funnel só para o ensaio T13b; desligar depois até as correções + 2ª passada. Correções aplicadas (710 testes). Falta: parte Claude da T16 (worker-opus) e 2ª passada do astra. Pendência: pior caso de escape com caracteres de controle no limite de resposta (fator 4 assume só `\\`).
+- **T16: gpt-6-astra deu 'não expor'** (6 importantes, ver DELEGATION_LOG). Funnel só para o ensaio T13b; desligar depois até as correções + 2ª passada. Correções das duas partes aplicadas (722 testes). 2ª passada (astra + opus) em andamento. Pendência: pior caso de escape com caracteres de controle no limite de resposta (fator 4 assume só `\\`).
 
 - T14: correções aplicadas (init em 2 etapas, lock de build com hash, wrapper com sandbox, deploy por SHA, alertas). Pra T16: `_check_key_file` no caso root/ACL aceita bit de escrita no grupo — endurecer pra aceitar só até 0440; `requirements-build.lock` gerado offline (conferir hashes contra o PyPI na T16). **Contrato da CLI pra T12**: serve, key-init [--substituir] (root direto), key-import (root direto), init (wrapper, pty), migrate, key-export (pty), backup, restore <arq em /var/backups>, restore-test, export --out - (stdout), wipe [--incluir-backups] (pty), grants, revoke <rótulo>, unlock, cleanup. Deploy instala por SHA, não por branch. T14 precisa de 2ª revisão depois da T12.
 

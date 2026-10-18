@@ -8,7 +8,7 @@ case "${1:-}" in
     key-init|key-import)
         echo "rode como root diretamente: sudo /opt/batataswap/.venv/bin/python -m batataswap $1" >&2
         exit 2 ;;
-    serve|init|migrate|key-export|backup|restore-test|export|lixeira|restaurar|grants|revoke|unlock|cleanup) ;;
+    serve|init|migrate|key-export|backup|restore-test|export|lixeira|restaurar|preferencias|expurgar|grants|revoke|unlock|cleanup) ;;
     restore|wipe)
         # list-units inclui units transitórias carregadas e timers ativando.
         units=$(systemctl list-units --all --no-legend --plain \
@@ -32,7 +32,7 @@ case "${1:-}" in
 esac
 terminal=(--pipe)
 case "$1" in
-    init|wipe|key-export) terminal=(--pty -E TERM) ;;
+    init|wipe|key-export|preferencias) terminal=(--pty -E TERM) ;;
 esac
 exec systemd-run --quiet --wait "${terminal[@]}" --collect --expand-environment=no \
     --uid=batataswap --gid=batataswap \

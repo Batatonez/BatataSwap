@@ -358,3 +358,20 @@ def test_trashed_records_do_not_count_in_last_write(world):
     entry = last("conta-2")
     assert entry["mensagens"] == 0 and entry["preferencias"] == 0
     assert entry["ultima_escrita"] is None
+
+
+def test_revoke_totp_budget_isolated_by_panel_grant(env):  # noqa: F811
+    from batataswap.auth.ratelimit import Budget, ScryptSlot
+    from batataswap.auth.routes import OAuthDeps
+    from batataswap.auth.totp import code_at
+    from batataswap.panel_api import _revoke
+    from tests.test_oauth import NOW
+
+    deps = OAuthDeps(env.config, env.keyring, env.connect, Budget(), ScryptSlot())
+    valid = code_at(env.secret, NOW // 30)
+    wrong = "000000" if valid != "000000" else "111111"
+    for _ in range(5):
+        assert _revoke(env.conn, deps, "conta-1", wrong, NOW, "painel_a")[0] == "invalido"
+    assert _revoke(env.conn, deps, "conta-1", valid, NOW, "painel_a")[0] == "trancado"
+    assert deps.budget.check("global") == 0
+    assert _revoke(env.conn, deps, "conta-1", valid, NOW, "painel_b")[0] == "sem_grant"
