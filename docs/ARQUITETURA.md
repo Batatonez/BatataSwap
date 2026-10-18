@@ -616,7 +616,8 @@ Ordem:
 5. **Corpo**, contado em streaming e lido inteiro **antes** do handler: 8 KiB sem credencial (4 KiB no `/oauth/token`), 256 KiB em `/mcp` autenticado, 16 KiB no resto. Estourou → 413; `Content-Length` declarado acima do teto → 413 sem ler.
    - **Rotas anônimas** (tudo que não é Bearer): o corpo é lido **sem vaga** do pool, com prazo contado **desde a entrada na borda**: 1 s no `/oauth/token`, 3 s em `/oauth/login`, `/oauth/consent` e no resto. Estourou → 408 com `Connection: close`. Assim um corpo lento nunca segura a admissão de um corpo pronto.
    - **Vaga do pool** (`/oauth/token` 8, login/consentimento 8 compartilhadas, resto 4): só depois do corpo completo, e só durante o **processamento** do handler (scrypt etc.). Espera até 2 s por vaga; sem vaga → 503 com `Retry-After: 1`. A vaga é solta quando o app começa a responder (`http.response.start`) ou no fim do handler, o que vier primeiro (uma vez só). GET/HEAD sem corpo não usam vaga.
-   - **Prazo de envio**: a resposta inteira de uma rota anônima tem 5 s (`SEND_TIMEOUT`), contados do `http.response.start`. Cliente que não lê a resposta estoura o prazo: a borda registra `envio_timeout` (agregado nos logs) e levanta exceção para o uvicorn fechar a conexão, mesmo que o app engula o erro. Rotas Bearer (`/mcp`, `/api/painel/*`) não têm esse prazo nem pool: o Bearer é validado antes do corpo, que tem prazo de 10 s no total e 5 s parado.
+   - **Prazo de envio**: a resposta inteira de uma rota anônima tem 5 s (`SEND_TIMEOUT`), contados do `http.response.start`. Cliente que não lê a resposta estoura o prazo: a borda registra `envio_timeout` (agregado nos logs) e levanta exceção para soltar a tarefa cedo, mesmo que o app engula o erro. Isso **não** garante o fechamento: com a escrita pausada antes dos headers, o uvicorn tenta mandar o 500 dele e trava de novo. Se o handler falhar ou terminar sem responder, a vaga do pool é solta **antes** do 500 de fallback, para nunca ficar presa num envio.
+   - **Prazo de escrita da conexão** (`batataswap.transport`, `WRITE_DRAIN_TIMEOUT` = 10 s): é ele que garante o fechamento. O servidor roda com um `H11Protocol` próprio cujo controle de fluxo arma um relógio quando o uvicorn pausa a escrita (buffer de envio cheio). Se a escrita ficar pausada 10 s seguidos, o transporte é abortado (`abort()`), o ciclo é marcado como desconectado e o evento `escrita_timeout` (agregado) é registrado. Vale para **toda** resposta: do app, os erros da própria borda (401/408/413/503, preflight), o 500 do uvicorn e o SSE do `/mcp`. Cliente que lê não fica 10 s com o buffer cheio. Rotas Bearer (`/mcp`, `/api/painel/*`) não têm esse prazo nem pool: o Bearer é validado antes do corpo, que tem prazo de 10 s no total e 5 s parado.
 6. **Headers de segurança** sempre:
    - `X-Content-Type-Options`, `X-Frame-Options: DENY`, HSTS;
    - `Referrer-Policy: same-origin` em respostas `text/html` e `no-referrer` no resto. Motivo: com `no-referrer`, o navegador manda `Origin: null` no POST do formulário (spec Fetch), e a checagem de Origin do login/consentimento recusaria o Davi;
@@ -875,8 +876,11 @@ O corpo anônimo é lido **sem vaga**, com prazo contado desde a entrada na bord
 8 KiB e 3 s. Estourou o prazo → 408. Só com o corpo completo a requisição disputa uma
 vaga do pool (`/oauth/token` 8; login e consentimento 8 compartilhadas; o resto 4),
 esperando até 2 s; sem vaga → 503 com `Retry-After: 1`. A vaga cobre só o processamento
-do handler e é solta no início da resposta. O envio da resposta tem prazo total de 5 s;
-estourou → evento `envio_timeout` e conexão abortada. GET/HEAD sem corpo
+do handler e é solta no início da resposta (ou antes do 500 de fallback). O envio da
+resposta tem prazo total de 5 s; estourou → evento `envio_timeout` e a tarefa é solta. O
+fechamento da conexão é garantido no nível do transporte: escrita pausada por 10 s seguidos
+(`WRITE_DRAIN_TIMEOUT`) → `abort()` e evento `escrita_timeout`, para qualquer resposta,
+inclusive os erros da borda e o 500 do uvicorn. GET/HEAD sem corpo
 (Content-Length ausente ou zero, sem Transfer-Encoding) não ocupam vaga. A memória de
 corpos em leitura fica limitada pelo teto de 8 KiB vezes o `limit_concurrency` do uvicorn.
 Permanece DoS volumétrico residual: saturar o pool de `/oauth/token` atrasa renovações;

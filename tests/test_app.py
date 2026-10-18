@@ -12,6 +12,7 @@ from starlette.testclient import TestClient
 
 from batataswap import __version__, db
 from batataswap.app import create_app, serve
+from batataswap.transport import DeadlineH11Protocol
 from tests.test_oauth import (  # noqa: F401
     NOW,
     ORIGIN,
@@ -180,7 +181,7 @@ def test_serve_options(env, monkeypatch):
             "forwarded_allow_ips": "",
             "access_log": False,
             "limit_concurrency": 512,
-            "http": "h11",
+            "http": DeadlineH11Protocol,
             "ws": "none",
             "timeout_keep_alive": 5,
             "timeout_graceful_shutdown": 15,

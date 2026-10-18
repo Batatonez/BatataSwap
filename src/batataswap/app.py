@@ -26,6 +26,7 @@ from batataswap.edge import EdgeMiddleware, RoutePolicy
 from batataswap.memory import Actor
 from batataswap.panel_api import panel_routes
 from batataswap.tools import register_tools, request_actor
+from batataswap.transport import DeadlineH11Protocol
 
 LOG_FLUSH_EVERY = 5
 
@@ -206,7 +207,7 @@ def serve(config):
         forwarded_allow_ips="",
         access_log=False,
         limit_concurrency=512,
-        http="h11",
+        http=DeadlineH11Protocol,
         ws="none",
         timeout_keep_alive=5,
         timeout_graceful_shutdown=15,

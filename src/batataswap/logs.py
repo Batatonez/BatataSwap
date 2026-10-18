@@ -37,6 +37,7 @@ EVENTS = frozenset(
         "corpo_grande",
         "corpo_timeout",
         "envio_timeout",
+        "escrita_timeout",
         "credencial_ausente",
         "erro_interno",
         "host_duplicado",
@@ -80,6 +81,7 @@ _AGGREGATED = {
     "rota_inexistente",
     "corpo_timeout",
     "envio_timeout",
+    "escrita_timeout",
     "token_recusado",
     "repassado",
 }

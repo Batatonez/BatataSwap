@@ -13,8 +13,11 @@ exigida e recusa cedo o que nem tem a forma certa. Ordem das checagens:
 6. headers de segurança em toda resposta, inclusive nos erros da própria borda.
 
 A vaga do pool anônimo cobre só o processamento do handler: ela é solta no
-``http.response.start`` (ou no fim, o que vier antes). O envio da resposta das rotas anônimas
-tem prazo total (``SEND_TIMEOUT``); estourou, a borda aborta a conexão.
+``http.response.start`` (ou antes do 500 de fallback, ou no fim, o que vier antes). O envio da
+resposta das rotas anônimas tem prazo total (``SEND_TIMEOUT``); estourou, a borda levanta
+exceção para soltar a tarefa cedo. A garantia de que a conexão fecha, para qualquer resposta
+(inclusive os erros da própria borda e o 500 do uvicorn), é o prazo de escrita da conexão em
+``batataswap.transport`` (``WRITE_DRAIN_TIMEOUT``).
 
 O uvicorn precisa rodar com ``server_header=False``, ``proxy_headers=False`` e
 ``forwarded_allow_ips=""``: o header ``Server`` é escrito pelo próprio uvicorn, fora do ASGI,
@@ -44,7 +47,8 @@ CORS_HEADERS = frozenset({"authorization", "content-type"})
 OTHER_BODY_BYTES = 16 * 1024
 SESSION_COOKIE = "__Host-bsw_sess"
 # Prazo total, em segundos, para enviar a resposta de uma rota anônima, contado do
-# ``http.response.start``. Cliente que não lê a resposta não segura a conexão para sempre.
+# ``http.response.start``. Solta a tarefa cedo; quem garante o fechamento da conexão é o
+# prazo de escrita em ``batataswap.transport``.
 SEND_TIMEOUT = 5
 
 EVENTS = frozenset(
@@ -659,7 +663,8 @@ class EdgeMiddleware:
     ):
         """Chama o app com o corpo já lido e filtra o que ele envia.
 
-        ``on_start`` roda uma vez, quando o app começa a responder (solta a vaga do pool).
+        ``on_start`` solta a vaga do pool: roda quando o app começa a responder ou antes do 500
+        de fallback (é idempotente).
         ``send_timeout`` (segundos, contados do ``http.response.start``) limita o envio inteiro da
         resposta; estourou, registra ``envio_timeout`` e levanta exceção para o servidor fechar
         a conexão, mesmo que o app engula o erro.
@@ -732,6 +737,9 @@ class EdgeMiddleware:
                 # sem a original encadeada, para o servidor abortar a conexão.
                 raise RuntimeError("erro interno") from None
             started = True
+            # A vaga sai ANTES do envio: um 500 preso num cliente que não lê não segura o pool.
+            if on_start is not None:
+                on_start()
             await self._send_error(
                 send, 500, "erro_interno", cors=rule.cors, cors_origin=cors_origin
             )
@@ -740,6 +748,8 @@ class EdgeMiddleware:
             # O app engoliu o erro do envio: a conexão ainda precisa ser abortada.
             raise RuntimeError("envio_timeout")
         if not started:
+            if on_start is not None:
+                on_start()
             await self._send_error(
                 send, 500, "erro_interno", cors=rule.cors, cors_origin=cors_origin
             )
