@@ -76,4 +76,4 @@ Veredito: "não expor". Nenhum crítico e nenhuma quebra de autenticação ou co
 - **I2**: ondas de corpos incompletos seguram as vagas do pool `/oauth/token` e um refresh legítimo recebe 503. Correção: ler o corpo sem ocupar vaga, com prazo contado desde a entrada, e só depois pegar a vaga.
 - **S1** (sugestão): `logs.py` perde o contador agregado do fim da rajada. Correção: flush periódico e no shutdown.
 
-Corrigido pelo worker-opus (commit "T16: residuais da 3ª passada"). Em andamento: 4ª passada do gpt-6-astra só nesses pontos (brief 029). Se a sessão cair, rodar de novo.
+Corrigido pelo worker-opus (6247a69). 4ª passada do gpt-6-astra: I1, I2 e S1 resolvidos, mas apareceu um IMPORTANTE novo: a vaga do pool fica presa no `send` da resposta quando o cliente não lê. Em andamento: worker-opus (brief 030) solta a vaga no `http.response.start`, põe prazo de envio e atualiza a ARQUITETURA §8. Depois: 5ª passada do astra. O painel da Vercel está ligado (vercel_origin = https://batataswap.vercel.app, autorizado pelo Davi).
