@@ -102,3 +102,11 @@ Corrigido pelo worker-opus (6247a69). 4ª passada do gpt-6-astra: I1, I2 e S1 re
 - Depois de configurado, testar a passagem no meio de uma tarefa (conta 1 → "retoma" na conta 2).
 
 Até a T17 terminar, só dado de teste.
+
+## Ideia para depois (projeto separado, não faz parte do BatataSwap)
+Script `bsw abrir <owner/repo>`, sem auto-swap de conta:
+- clona ou atualiza o repositório numa pasta de cache e abre o `claude` nela;
+- ao sair, faz commit e push do que ficou pendente numa branch de trabalho;
+- objetivo: usar o CLI nos 3 PCs sem criar pasta na mão.
+
+Antes de construir, conferir se o Claude Code já faz isso (teleport de sessão web → terminal).
