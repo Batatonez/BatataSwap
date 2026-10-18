@@ -26,6 +26,12 @@ from batataswap.panel_api import panel_routes
 from batataswap.tools import register_tools, request_actor
 
 
+def _grant_atual():
+    """Id público do grant da requisição; None sem actor (erro antes da autenticação)."""
+    actor = request_actor.get(None)
+    return actor.grant_public_id if actor is not None else None
+
+
 def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_routes=()):
     """Cria ASGI sem iniciar rede. extra_routes precedem as reservas dos painéis futuros."""
 
@@ -58,7 +64,12 @@ def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_rout
                 async def handler(ctx, params):
                     start = time.monotonic()
                     response = await original(ctx, params)
-                    logs.tool(params.name, response, (time.monotonic() - start) * 1000)
+                    logs.tool(
+                        params.name,
+                        response,
+                        (time.monotonic() - start) * 1000,
+                        grant=_grant_atual(),
+                    )
                     return response
 
             server.add_request_handler(name, params_type, handler)
@@ -68,7 +79,12 @@ def create_app(config, keyring, *, db_path, fetcher=None, clock=None, extra_rout
     async def dispatch(name, arguments):
         start = time.monotonic()
         response = await raw_dispatch(name, arguments)
-        logs.tool(name, response, (time.monotonic() - start) * 1000)
+        logs.tool(
+            name,
+            response,
+            (time.monotonic() - start) * 1000,
+            grant=_grant_atual(),
+        )
         return response
 
     transport = server.streamable_http_app(

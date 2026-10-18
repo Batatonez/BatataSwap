@@ -13,6 +13,7 @@ import anyio.to_thread
 from mcp import types
 
 from batataswap import conversations as conv
+from batataswap import logs
 from batataswap import memory as mem
 
 request_actor: ContextVar[mem.Actor] = ContextVar("batataswap_request_actor")
@@ -280,6 +281,11 @@ def _execute(conn, deps, actor, name, args, now):
         limit = max(1, limit // 2)
 
 
+def _grant_atual():
+    actor = request_actor.get(None)
+    return actor.grant_public_id if actor is not None else None
+
+
 def register_tools(server, deps):
     """Registra handlers públicos do SDK 2.x; retorna dispatch para chamadas diretas/testes."""
     definitions = []
@@ -326,6 +332,8 @@ def register_tools(server, deps):
 
             return await anyio.to_thread.run_sync(run)
         except mem.MemoryServiceError as error:
+            if isinstance(error, mem.LimitExceeded):
+                logs.emit("limite", 400, grant=_grant_atual())
             return result({"erro": str(error)}, error=True)
         except Exception:  # noqa: BLE001 — fronteira MCP: nunca expor exceção inesperada
             return result({"erro": "Não foi possível concluir a operação."}, error=True)

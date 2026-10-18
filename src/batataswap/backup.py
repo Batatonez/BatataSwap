@@ -108,13 +108,20 @@ def backup(conn, directory, now):
 
 def retain(directory, now):
     today = datetime.fromtimestamp(now, UTC).date()
+    dated = []
     for path in directory.glob("????-??-??.db"):
         try:
             date = datetime.strptime(path.stem, "%Y-%m-%d").date()
         except ValueError:
             continue
+        dated.append((date, path))
+    weekly = {}
+    for date, path in sorted(dated):
+        if 14 <= (today - date).days < 56:
+            weekly[date.isocalendar()[:2]] = path
+    for date, path in dated:
         age = (today - date).days
-        if age >= 56 or (age >= 14 and date.weekday() != 6):
+        if age >= 56 or (age >= 14 and path not in weekly.values()):
             path.unlink()
             path.with_suffix(".json").unlink(missing_ok=True)
 
@@ -122,7 +129,10 @@ def retain(directory, now):
 def verified_copy(source, destination, keyring=None):
     if source.is_symlink() or not source.is_file():
         raise ValueError("Backup inválido.")
-    manifest = json.loads(source.with_suffix(".json").read_text())
+    metadata = source.with_suffix(".json")
+    if metadata.is_symlink():
+        raise ValueError("Manifesto inválido.")
+    manifest = json.loads(metadata.read_text())
     private_write(destination, b"")
     shutil.copyfile(source, destination)
     if digest(destination) != manifest["sha256"]:
@@ -146,8 +156,8 @@ def restore_test(directory, keyring):
 
 def revoke_all(conn, now):
     with db.write_transaction(conn):
-        conn.execute("UPDATE oauth_grants SET revoked_at=?", (now,))
-        conn.execute("UPDATE oauth_tokens SET revoked_at=?", (now,))
+        conn.execute("UPDATE oauth_grants SET revoked_at=? WHERE revoked_at IS NULL", (now,))
+        conn.execute("UPDATE oauth_tokens SET revoked_at=? WHERE revoked_at IS NULL", (now,))
         for table in (
             "oauth_transactions",
             "oauth_codes",
@@ -159,7 +169,11 @@ def revoke_all(conn, now):
 
 
 def restore(source, target, directory, keyring, now):
-    if source.is_symlink() or not source.resolve().is_relative_to(directory.resolve()):
+    if (
+        ".." in source.parts
+        or source.is_symlink()
+        or not source.resolve().is_relative_to(directory.resolve())
+    ):
         raise ValueError("Restore aceita somente arquivo dentro da pasta de backups.")
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=target.parent) as temporary:
@@ -182,6 +196,7 @@ def restore(source, target, directory, keyring, now):
                 current.execute("PRAGMA locking_mode=EXCLUSIVE")
                 current.execute("BEGIN EXCLUSIVE")
                 current.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            if any(Path(str(target) + suffix).exists() for suffix in ("", "-wal", "-shm")):
                 folder = target.parent / datetime.fromtimestamp(now, UTC).strftime(
                     "antes-do-restore-%Y%m%d-%H%M%S"
                 )

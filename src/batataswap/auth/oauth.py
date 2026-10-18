@@ -214,6 +214,9 @@ def csrf_token(keyring: Keyring, tx_id: str) -> str:
 
 
 def _audit(conn, event: str, grant_id: int | None, target: str | None, now: int) -> None:
+    from batataswap import logs
+
+    logs.emit(event, 200, grant=target)
     assert event in AUDIT_EVENTS
     conn.execute(
         "INSERT INTO audit(at,event,grant_id,target) VALUES (?,?,?,?)",

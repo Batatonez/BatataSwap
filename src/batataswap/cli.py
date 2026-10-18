@@ -4,6 +4,8 @@ import argparse
 import getpass
 import json
 import os
+import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -15,10 +17,19 @@ from batataswap.auth import oauth, owner, passwords, totp
 from batataswap.config import load_config
 
 
+class AdminError(Exception):
+    """Mensagem administrativa segura para exibição."""
+
+
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         self.print_usage(sys.stderr)
-        self.exit(2, "Uso inválido. Confira os argumentos do comando.\n")
+        expected = []
+        for action in self._actions:
+            expected.extend(action.option_strings)
+            if isinstance(action, argparse._SubParsersAction):
+                expected.extend(action.choices)
+        self.exit(2, "Uso inválido. Opções/comandos esperados: " + ", ".join(expected) + "\n")
 
 
 def main(
@@ -27,7 +38,7 @@ def main(
     config=None,
     runner=None,
     credstore=Path("/etc/credstore.encrypted/batataswap-master"),
-    creds_binary="systemd-creds",
+    creds_binary="/usr/bin/systemd-creds",
 ):
     parser = Parser(prog="batataswap", description="Administração do BatataSwap.")
     parser.add_argument("--version", action="version", version=f"batataswap {__version__}")
@@ -45,35 +56,57 @@ def main(
         "cleanup",
     ):
         commands.add_parser(name)
-    commands.add_parser("key-init").add_argument("--substituir", action="store_true")
+    key_parser = commands.add_parser("key-init")
+    key_parser.add_argument("--substituir", action="store_true")
+    key_parser.add_argument("--banco-sera-perdido", action="store_true")
     commands.add_parser("restore").add_argument("arquivo", type=Path)
     commands.add_parser("revoke").add_argument("rotulo")
     commands.add_parser("export").add_argument("--out", required=True)
     commands.add_parser("wipe").add_argument("--incluir-backups", action="store_true")
     args = parser.parse_args(argv)
     command = args.command
+    logs.ADMIN = True
     try:
+        if command == "export" and args.out != "-":
+            raise AdminError("Use sudo batataswap-admin export --out - > ~/memoria.json")
         if command in {"key-init", "key-import"}:
             if os.geteuid() != 0:
-                raise ValueError("Execute como root.")
+                raise AdminError("Execute como root.")
             if credstore.exists() or credstore.is_symlink():
                 if command != "key-init" or not args.substituir:
-                    raise ValueError("Credencial já existe.")
+                    raise AdminError("Credencial já existe.")
                 if input("Digite SUBSTITUIR CHAVE: ") != "SUBSTITUIR CHAVE":
-                    raise ValueError("Substituição cancelada.")
+                    raise AdminError("Substituição cancelada.")
+            if command == "key-init" and args.substituir:
+                config = config or load_config()
+                if (config.data_dir / "batataswap.db").exists() and not args.banco_sera_perdido:
+                    raise AdminError(
+                        "A troca deixa o banco ilegível. Use --substituir "
+                        "--banco-sera-perdido para confirmar."
+                    )
             key = (
                 crypto.generate_master_key()
                 if command == "key-init"
                 else crypto.import_key(getpass.getpass("Chave de recuperação: "))
             )
-            (runner or subprocess.run)(
-                [creds_binary, "encrypt", "--name=batataswap-master", "-", str(credstore)],
-                input=key,
-                shell=False,
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            temporary = Path(str(credstore) + ".novo")
+            if temporary.exists() or temporary.is_symlink():
+                raise AdminError("Credencial temporária já existe.")
+            mask = os.umask(0o077)
+            try:
+                (runner or subprocess.run)(
+                    [creds_binary, "encrypt", "--name=batataswap-master", "-", str(temporary)],
+                    input=key,
+                    shell=False,
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                )
+                temporary.chmod(0o600)
+                os.replace(temporary, credstore)
+                credstore.chmod(0o600)
+            finally:
+                os.umask(mask)
+                temporary.unlink(missing_ok=True)
             if command == "key-init":
                 print("Guarde esta chave no gerenciador de senhas. Ela aparece uma vez.")
                 print(crypto.export_key(key))
@@ -105,27 +138,37 @@ def main(
                 db.migrate(conn)
             if command == "init":
                 if conn.execute("SELECT 1 FROM owner").fetchone():
-                    raise ValueError("Dono já cadastrado.")
-                password = passwords.validate_new_password(getpass.getpass("Senha: "))
-                if password != getpass.getpass("Confirme a senha: "):
-                    raise ValueError("As senhas não conferem.")
+                    raise AdminError("Dono já cadastrado.")
+                for attempt in range(3):
+                    try:
+                        password = passwords.validate_new_password(getpass.getpass("Senha: "))
+                        if password != getpass.getpass("Confirme a senha: "):
+                            raise AdminError("As senhas não conferem.")
+                        break
+                    except (ValueError, AdminError) as error:
+                        print(str(error), file=sys.stderr)
+                else:
+                    raise AdminError("Tentativas de senha esgotadas.")
                 secret = totp.generate_secret()
                 uri = totp.provisioning_uri(secret)
                 print(totp.qr_text(uri))
                 print(uri)
-                owner.create_owner(
-                    conn, keyring, password, secret, input("Código TOTP: "), time.time()
-                )
+                for attempt in range(5):
+                    code = input("Código TOTP: ")
+                    if totp.verify(secret, code, time.time(), -1) is None:
+                        print("Código inválido, tente de novo", file=sys.stderr)
+                        continue
+                    owner.create_owner(conn, keyring, password, secret, code, time.time())
+                    break
+                else:
+                    raise AdminError("Tentativas de TOTP esgotadas.")
             elif command == "backup":
                 backup.backup(conn, config.backup_dir, now)
                 logs.emit("backup_ok", 200)
             elif command == "export":
                 print("Aviso: exportação em texto puro, sem cifra.", file=sys.stderr)
                 payload = json.dumps(memory.export_all(conn, keyring), ensure_ascii=False)
-                if args.out == "-":
-                    print(payload)
-                else:
-                    backup.private_write(Path(args.out), payload.encode())
+                print(payload)
             elif command == "grants":
                 print("rótulo\tativo\tdesde\túltimo uso")
                 for label, revoked, created, used, expires in conn.execute(
@@ -142,10 +185,9 @@ def main(
                     (args.rotulo, now),
                 ).fetchall()
                 if not rows:
-                    raise ValueError("Grant ativo não encontrado.")
+                    raise AdminError("Grant ativo não encontrado.")
                 for (public_id,) in rows:
                     oauth.revoke_grant(conn, public_id, now)
-                    logs.emit("grant_revogado", 200, grant=public_id)
             elif command == "unlock":
                 owner.unlock(conn, now)
             elif command == "cleanup":
@@ -155,29 +197,45 @@ def main(
                 owner.cleanup_known_devices(conn, now)
             elif command == "wipe":
                 if input("Digite APAGAR TUDO: ") != "APAGAR TUDO":
-                    raise ValueError("Exclusão cancelada.")
+                    raise AdminError("Exclusão cancelada.")
                 for table in ("projects", "preferences", "conversations"):
                     for (public_id,) in conn.execute(f"SELECT public_id FROM {table}").fetchall():
                         memory.purge(conn, memory.Actor(None, None, "cli"), public_id, now=now)
                 backup.revoke_all(conn, now)
                 conn.execute("VACUUM")
-                if args.incluir_backups:
-                    import shutil
-
-                    for item in config.backup_dir.iterdir():
-                        if item.is_dir() and not item.is_symlink():
-                            shutil.rmtree(item)
-                        else:
-                            item.unlink()
+                items = list(config.data_dir.glob("antes-do-restore-*"))
+                items += list(config.data_dir.glob("*.json"))
+                if args.incluir_backups and config.backup_dir.exists():
+                    items += list(config.backup_dir.iterdir())
+                for item in items:
+                    if item.is_dir() and not item.is_symlink():
+                        shutil.rmtree(item)
+                    else:
+                        item.unlink()
+                    print(f"Removido: {item}")
         return 0
-    except Exception:  # noqa: BLE001 — fronteira CLI: nunca imprimir segredos da exceção
+    except Exception as error:  # noqa: BLE001 — fronteira CLI: nunca imprimir segredos da exceção
         if command in {"backup", "restore-test"}:
             logs.emit(
                 "backup_falhou" if command == "backup" else "restore_teste_falhou", 500, nivel="err"
             )
-        print(
-            "Não foi possível concluir o comando. Confira a configuração, os dados "
-            "e as confirmações informadas.",
-            file=sys.stderr,
-        )
+        message = "Não foi possível concluir o comando. Confira a configuração, os dados e as confirmações informadas."
+        if isinstance(
+            error, (AdminError, memory.InvalidInput, db.DatabaseError, crypto.CryptoError)
+        ):
+            message = str(error)
+        elif isinstance(error, sqlite3.OperationalError) and "locked" in str(error):
+            message = "banco em uso: pare o serviço (sudo systemctl stop batataswap)"
+        elif type(error) is ValueError and str(error) in {
+            "Dono já cadastrado.",
+            "Segredo TOTP inválido.",
+            "Código TOTP inválido.",
+            "A senha deve ter entre 12 e 1024 caracteres.",
+            "Escolha uma senha menos comum.",
+            "Senha inválida.",
+        }:
+            message = str(error)
+        print(message, file=sys.stderr)
         return 1
+    finally:
+        logs.ADMIN = False

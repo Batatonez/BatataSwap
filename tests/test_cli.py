@@ -55,14 +55,27 @@ def test_restore_and_tampering(setup_cli):
 
 def test_keys(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
-    runner = Mock()
+
+    def encrypt(argv, **kwargs):
+        from pathlib import Path
+
+        Path(argv[-1]).write_bytes(b"encrypted")
+
+    runner = Mock(side_effect=encrypt)
     target = tmp_path / "credential"
     assert cli.main(["key-init"], runner=runner, credstore=target) == 0
     args, kwargs = runner.call_args
-    assert args[0] == ["systemd-creds", "encrypt", "--name=batataswap-master", "-", str(target)]
+    assert args[0] == [
+        "/usr/bin/systemd-creds",
+        "encrypt",
+        "--name=batataswap-master",
+        "-",
+        str(target) + ".novo",
+    ]
     assert len(kwargs["input"]) == 32 and kwargs["shell"] is False and kwargs["check"] is True
     text = capsys.readouterr().out.splitlines()[-1]
     monkeypatch.setattr(cli.getpass, "getpass", lambda _: text)
+    target.unlink()
     assert cli.main(["key-import"], runner=runner, credstore=target) == 0
     assert runner.call_args.kwargs["input"] == crypto.import_key(text)
     target.touch()
@@ -101,3 +114,177 @@ def test_init_and_revoke(setup_cli, monkeypatch):
     assert conn.execute("SELECT revoked_at FROM oauth_grants").fetchone()[0] is not None
     assert conn.execute("SELECT revoked_at FROM oauth_tokens").fetchone()[0] is not None
     conn.close()
+
+
+def test_export_only_stdout(setup_cli, capsys, tmp_path):
+    target = tmp_path / "memoria.json"
+    assert cli.main(["export", "--out", str(target)], config=setup_cli) == 1
+    assert not target.exists()
+    assert "sudo batataswap-admin export --out - > ~/memoria.json" in capsys.readouterr().err
+
+
+def test_init_retries(setup_cli, monkeypatch, capsys):
+    from batataswap.auth import owner, passwords, totp
+
+    prompts = iter(
+        [
+            "curta",
+            "senha longa rara 726!",
+            "diferente",
+            "senha longa rara 726!",
+            "senha longa rara 726!",
+        ]
+    )
+    monkeypatch.setattr(cli.getpass, "getpass", lambda _: next(prompts))
+    secret = b"t" * 20
+    generate = Mock(return_value=secret)
+    monkeypatch.setattr(totp, "generate_secret", generate)
+    codes = iter(["errado", totp.code_at(secret, int(cli.time.time()) // 30)])
+    monkeypatch.setattr("builtins.input", lambda _: next(codes))
+    monkeypatch.setattr(owner, "hash_password", lambda pw: passwords.hash_password(pw, log_n=10))
+    assert cli.main(["init"], config=setup_cli) == 0
+    generate.assert_called_once()
+    output = capsys.readouterr().err
+    assert "12 e 1024" in output
+    assert "não conferem" in output
+    assert "Código inválido, tente de novo" in output
+
+
+@pytest.mark.parametrize("field", ["password", "totp"])
+def test_init_attempt_limits(setup_cli, monkeypatch, field):
+    monkeypatch.setattr(
+        cli.getpass,
+        "getpass",
+        Mock(return_value=("curta" if field == "password" else "senha longa rara 726!")),
+    )
+    codes = Mock(return_value="errado")
+    monkeypatch.setattr("builtins.input", codes)
+    assert cli.main(["init"], config=setup_cli) == 1
+    if field == "totp":
+        assert codes.call_count == 5
+    else:
+        assert cli.getpass.getpass.call_count == 3
+    with db.connect(setup_cli.data_dir / "batataswap.db") as conn:
+        assert conn.execute("SELECT count(*) FROM owner").fetchone() == (0,)
+
+
+def test_key_replace_and_runner_failure(setup_cli, tmp_path, monkeypatch, capsys):
+    import subprocess
+
+    target = tmp_path / "credential"
+    target.write_bytes(b"old")
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+    monkeypatch.setattr("builtins.input", lambda _: "SUBSTITUIR CHAVE")
+    runner = Mock()
+    assert (
+        cli.main(["key-init", "--substituir"], config=setup_cli, runner=runner, credstore=target)
+        == 1
+    )
+    runner.assert_not_called()
+    assert "ilegível" in capsys.readouterr().err
+
+    def encrypt(argv, **kwargs):
+        assert cli.os.umask(0o077) == 0o077
+        from pathlib import Path
+
+        Path(argv[-1]).write_bytes(b"new")
+
+    assert (
+        cli.main(
+            ["key-init", "--substituir", "--banco-sera-perdido"],
+            config=setup_cli,
+            runner=encrypt,
+            credstore=target,
+        )
+        == 0
+    )
+    assert target.read_bytes() == b"new"
+    assert target.stat().st_mode & 0o777 == 0o600
+    capsys.readouterr()
+    secret = b"z" * 32
+    monkeypatch.setattr(crypto, "generate_master_key", lambda: secret)
+    runner = Mock(side_effect=subprocess.CalledProcessError(1, "SEGREDO"))
+    assert (
+        cli.main(
+            ["key-init", "--substituir", "--banco-sera-perdido"],
+            config=setup_cli,
+            runner=runner,
+            credstore=target,
+        )
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert crypto.export_key(secret) not in captured.out + captured.err
+    assert "SEGREDO" not in captured.out + captured.err
+    assert target.read_bytes() == b"new"
+
+
+def test_parser_does_not_echo_values(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["SEGREDO"])
+    assert "SEGREDO" not in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        cli.main(["key-init", "--SEGREDO"])
+    assert "SEGREDO" not in capsys.readouterr().err
+
+
+def test_locked_message(setup_cli, monkeypatch, capsys):
+    import sqlite3
+
+    monkeypatch.setattr(cli.backup, "restore", Mock(side_effect=sqlite3.OperationalError("locked")))
+    assert cli.main(["restore", "backup.db"], config=setup_cli) == 1
+    assert "sudo systemctl stop batataswap" in capsys.readouterr().err
+
+
+from tests.test_oauth import env  # noqa: F401
+
+
+def test_wipe_real_data(env, tmp_path, monkeypatch, capsys):  # noqa: F811
+    from dataclasses import replace
+
+    from batataswap import memory
+    from tests.test_oauth import NOW, claude_tokens
+
+    claude_tokens(env)
+    grant = env.conn.execute("SELECT id,public_id FROM oauth_grants").fetchone()
+    memory.save_context(
+        env.conn,
+        env.keyring,
+        env.config.limits,
+        memory.Actor(*grant, "conta-1"),
+        "projeto",
+        "resumo",
+        [],
+        [],
+        [],
+        now=NOW,
+    )
+    env.conn.execute(
+        "INSERT INTO known_devices(token_hash,created_at,expires_at) VALUES (x'01',?,?)",
+        (NOW, NOW + 1000),
+    )
+    # A CLI usa o nome de banco de produção.
+    env.conn.close()
+    path = tmp_path / "batataswap.db"
+    env.path.rename(path)
+    config = replace(env.config, data_dir=tmp_path, backup_dir=tmp_path / "missing")
+    monkeypatch.setattr(crypto, "load_master_key", lambda: b"k" * 32)
+    monkeypatch.setattr(crypto, "Keyring", lambda _: env.keyring)
+    monkeypatch.setattr("builtins.input", lambda _: "APAGAR TUDO")
+    folder = tmp_path / "antes-do-restore-velho"
+    folder.mkdir()
+    (folder / "old.db").write_bytes(b"old")
+    plain = tmp_path / "memoria.json"
+    plain.write_text("segredo")
+    assert cli.main(["wipe", "--incluir-backups"], config=config) == 0
+    assert not plain.exists() and not folder.exists()
+    output = capsys.readouterr().out
+    assert str(plain) in output and str(folder) in output
+    with db.connect(path) as conn:
+        assert conn.execute("SELECT name_ct FROM projects").fetchone() == (None,)
+        assert conn.execute("SELECT content_ct FROM contexts").fetchone() == (None,)
+        assert conn.execute("SELECT count(*) FROM known_devices").fetchone() == (0,)
+        assert conn.execute("SELECT revoked_at FROM oauth_grants").fetchone()[0] is not None
+        assert conn.execute(
+            "SELECT count(*) FROM oauth_tokens WHERE revoked_at IS NULL"
+        ).fetchone() == (0,)

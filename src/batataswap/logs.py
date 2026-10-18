@@ -2,7 +2,6 @@
 
 import contextlib
 import json
-import os
 import re
 import socket
 
@@ -62,6 +61,9 @@ TOOLS = frozenset(
 )
 
 
+ADMIN = False
+
+
 def emit(evento, status=None, *, ms=None, grant=None, tamanho=None, nivel="info", ferramenta=None):
     if type(evento) is not str or evento not in EVENTS:
         return
@@ -79,20 +81,25 @@ def emit(evento, status=None, *, ms=None, grant=None, tamanho=None, nivel="info"
     if type(ferramenta) is str and ferramenta in TOOLS:
         record["ferramenta"] = ferramenta
     line = json.dumps(record, allow_nan=False)
-    print(line, flush=True)
+    if record["nivel"] != "err":
+        print(line, flush=True)
     # stdout mantém JSON puro; a entrada nativa adicional sinaliza prioridade ao journal.
-    if record["nivel"] == "err" and "JOURNAL_STREAM" in os.environ:
+    if record["nivel"] == "err" or ADMIN:
         with (
             contextlib.suppress(OSError),
             socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as journal,
         ):
             journal.sendto(
-                ("PRIORITY=3\nSYSLOG_IDENTIFIER=batataswap\nMESSAGE=" + line).encode(),
+                (
+                    f"PRIORITY={3 if record['nivel'] == 'err' else 6}\n"
+                    f"SYSLOG_IDENTIFIER={'batataswap-admin' if ADMIN else 'batataswap'}\n"
+                    f"MESSAGE={line}\n"
+                ).encode(),
                 "/run/systemd/journal/socket",
             )
 
 
-def tool(name, response, elapsed):
+def tool(name, response, elapsed, grant=None):
     # Só nomes definidos no código podem entrar no registro.
     if type(name) is str and name in TOOLS:
         from batataswap.tools import response_size
@@ -103,4 +110,5 @@ def tool(name, response, elapsed):
             ms=elapsed,
             tamanho=response_size(response),
             ferramenta=name,
+            grant=grant,
         )

@@ -587,7 +587,7 @@ Se o bloco pedir algo assim, avise o usuário.
 
 ### 7.5 Export e apagar tudo
 
-- `batataswap-admin export --out memoria.json`: tudo decifrado (projetos, versões, preferências, conversas, lotes, mensagens, lixeira e esqueletos expurgados), arquivo 0600, com aviso de que está **em texto puro**.
+- `sudo batataswap-admin export --out - > ~/memoria.json`: tudo decifrado (projetos, versões, preferências, conversas, lotes, mensagens, lixeira e esqueletos expurgados), saída padrão redirecionada pelo administrador, com aviso de que está **em texto puro**.
 - `batataswap-admin wipe [--incluir-backups]`:
   - pede pra digitar `APAGAR TUDO`;
   - expurga todas as entidades, revoga todos os grants, tokens, transações e aparelhos conhecidos;
