@@ -77,3 +77,8 @@ Veredito: "não expor". Nenhum crítico e nenhuma quebra de autenticação ou co
 - **S1** (sugestão): `logs.py` perde o contador agregado do fim da rajada. Correção: flush periódico e no shutdown.
 
 Corrigido pelo worker-opus (6247a69). 4ª passada do gpt-6-astra: I1, I2 e S1 resolvidos, mas apareceu um IMPORTANTE novo: a vaga do pool fica presa no `send` da resposta quando o cliente não lê. Corrigido pelo worker-opus (brief 030: vaga solta no response.start, prazo de envio de 5 s em rotas anônimas, ARQUITETURA §8). 5ª passada do gpt-6-astra: não expor, por 2 IMPORTANTES de DoS (o 500 do uvicorn trava no drain quando a escrita pausa antes dos headers; os erros da borda e o fallback 500 não têm prazo, e o 500 segura vaga). Corrigido pelo worker-opus (brief 032: src/batataswap/transport.py com DeadlineH11Protocol, escrita pausada por mais de 10 s faz transport.abort(); vaga solta antes dos 500). 6ª passada do gpt-6-astra (d5bb9c8): **Veredito: expor**. T16 CONCLUÍDA. Próximo: Davi atualiza o servidor e segue a T17 (validação real, checklist em docs/DEPLOY.md). Depois disso pode usar dado real. O painel da Vercel está ligado (vercel_origin = https://batataswap.vercel.app, autorizado pelo Davi).
+
+## 2026-10-18 — servidor em 229371a e painel da Vercel funcionando
+- Servidor atualizado para 229371a, a versão aprovada na T16.
+- vercel_origin ligado e login no painel OK (o rewrite /callback foi corrigido em 3fa782a).
+- Próximo: T17, um passo por vez, seguindo o checklist do docs/DEPLOY.md. Primeiro passo: conferir as duas contas depois da troca para token com tag.
