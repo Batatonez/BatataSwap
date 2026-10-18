@@ -8,6 +8,8 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+CLAUDE_CIMD_CLIENT_ID = "https://claude.ai/oauth/mcp-oauth-client-metadata"
+
 
 class ConfigError(ValueError):
     """Configuração ausente ou inválida."""
@@ -95,7 +97,10 @@ class Config:
     backup_dir: Path = Path("/var/backups/batataswap")
     vercel_origin: str | None = None
     painel_client_id: str = "painel-vercel"
-    allowed_cimd_client_ids: tuple[str, ...] = field(default_factory=tuple)
+    # client_id do CIMD do Claude hospedado, medido no spike (ARQUITETURA §1.0 e §4.1).
+    allowed_cimd_client_ids: tuple[str, ...] = field(
+        default_factory=lambda: (CLAUDE_CIMD_CLIENT_ID,)
+    )
     allowed_mcp_origins: tuple[str, ...] = field(default_factory=tuple)
     account_labels: tuple[str, ...] = field(default_factory=lambda: ("conta-1", "conta-2"))
     limits: Limits = field(default_factory=Limits)
@@ -151,6 +156,11 @@ class Config:
     @property
     def panel_resource(self) -> str:
         return self.public_origin + "/api/painel"
+
+    @property
+    def painel_redirect_uri(self) -> str | None:
+        """Redirect exato do client estático ``painel-vercel`` (§4.1); sem Vercel, sem painel."""
+        return None if self.vercel_origin is None else self.vercel_origin + "/callback"
 
     @property
     def issuer(self) -> str:

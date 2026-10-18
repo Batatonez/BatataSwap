@@ -1,0 +1,151 @@
+/* Login e consentimento do BatataSwap: mobile-first, sóbrio, sem dependências. */
+:root {
+  color-scheme: light dark;
+  --fundo: #f6f5f2;
+  --cartao: #ffffff;
+  --texto: #1d1d1b;
+  --suave: #5f5e5a;
+  --borda: #d6d4cf;
+  --destaque: #2f5d50;
+  --destaque-texto: #ffffff;
+  --aviso-fundo: #fbeaea;
+  --aviso-texto: #7a1f1f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fundo: #161615;
+    --cartao: #20201f;
+    --texto: #ecebe7;
+    --suave: #a9a7a1;
+    --borda: #3a3936;
+    --destaque: #7fb5a3;
+    --destaque-texto: #10201b;
+    --aviso-fundo: #3a1d1d;
+    --aviso-texto: #f3c4c4;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--fundo);
+  color: var(--texto);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+main {
+  max-width: 26rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.marca {
+  margin: 0 0 1.5rem;
+  color: var(--suave);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.5rem;
+  line-height: 1.25;
+}
+
+.quem {
+  margin: 0 0 1.25rem;
+  color: var(--suave);
+}
+
+.quem strong {
+  color: var(--texto);
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+label {
+  font-weight: 600;
+}
+
+input[type="password"],
+input[type="text"] {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--borda);
+  border-radius: 0.5rem;
+  background: var(--cartao);
+  color: var(--texto);
+  font-size: 1rem;
+}
+
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--destaque);
+  outline-offset: 2px;
+}
+
+.opcao {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  font-weight: 400;
+}
+
+.nota {
+  color: var(--suave);
+  font-size: 0.875rem;
+}
+
+fieldset {
+  margin: 0.5rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--borda);
+  border-radius: 0.5rem;
+}
+
+legend {
+  padding: 0 0.25rem;
+  font-weight: 600;
+}
+
+button {
+  margin-top: 0.75rem;
+  padding: 0.85rem 1rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--destaque);
+  color: var(--destaque-texto);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.secundario {
+  margin-top: 0.25rem;
+  border: 1px solid var(--borda);
+  background: transparent;
+  color: var(--texto);
+}
+
+.permissoes {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+}
+
+.aviso {
+  margin: 0 0 1rem;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background: var(--aviso-fundo);
+  color: var(--aviso-texto);
+}
