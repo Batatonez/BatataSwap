@@ -109,6 +109,35 @@ def test_panel_token_rejected(env):
         assert 'error="invalid_token"' in response.headers["www-authenticate"]
 
 
+def test_saude_cors_aberto_sem_credenciais(env):
+    app = app_for(env)
+    with TestClient(app, base_url=ORIGIN) as client:
+        for origem in ("https://batataswap.vercel.app", "https://mal.example"):
+            r = client.get("/saude", headers={"Origin": origem})
+            assert r.status_code == 200
+            assert r.json() == {"ok": True, "versao": __version__}
+            assert r.headers["access-control-allow-origin"] == "*"
+            assert "access-control-allow-credentials" not in r.headers
+        r = client.options(
+            "/saude",
+            headers={
+                "Origin": "https://mal.example",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert r.status_code == 204
+        assert r.headers["access-control-allow-origin"] == "*"
+        assert "access-control-allow-credentials" not in r.headers
+        # /oauth/token continua só para a origem exata da Vercel (não configurada aqui).
+        r = client.post(
+            "/oauth/token",
+            headers={"Origin": "https://mal.example"},
+            data={"grant_type": "x"},
+        )
+        assert "access-control-allow-origin" not in r.headers
+        assert "access-control-allow-credentials" not in r.headers
+
+
 def test_html_referrer_and_extra_routes(env):
     async def html(request):
         return HTMLResponse("<p>Teste</p>")

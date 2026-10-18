@@ -2,7 +2,7 @@
 // Regra: nenhum dado vira HTML. Tudo é montado com createElement + textContent.
 "use strict";
 
-const IS_DEMO = API_ORIGIN === "" || new URLSearchParams(location.search).has("demo");
+const NOT_CONFIGURED = API_ORIGIN === "";
 const API_BASE = API_ORIGIN.replace(/\/+$/, "");
 const RESOURCE = API_BASE + "/api/painel";
 const TX_KEY = "batataswap_tx";
@@ -23,14 +23,6 @@ function el(tag, props, children) {
 
 function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
-}
-
-function showDemoBanner() {
-  if (!IS_DEMO) return;
-  const slot = document.getElementById("demo-banner");
-  if (!slot) return;
-  slot.textContent = "Demonstração — dados de mentira";
-  slot.hidden = false;
 }
 
 // ---------- datas ----------
@@ -73,37 +65,9 @@ function formatBytes(n) {
   return (n / 1024 / 1024).toFixed(1).replace(".", ",") + " MiB";
 }
 
-// ---------- dados de mentira ----------
-function agoIso(min) {
-  return new Date(Date.now() - min * 60000).toISOString();
-}
-
-const DEMO = {
-  conexoes: () => ({
-    conexoes: [
-      { rotulo: "conta-1", ativo: true, conectado_desde: agoIso(60 * 24 * 12), ultimo_uso: agoIso(5) },
-      { rotulo: "conta-2", ativo: true, conectado_desde: agoIso(60 * 24 * 9), ultimo_uso: agoIso(60 * 26) },
-    ],
-  }),
-  atividade: () => ({
-    por_conta: [
-      { rotulo: "conta-1", contextos: 12, mensagens: 340, preferencias: 3, ultima_escrita: agoIso(7) },
-      { rotulo: "conta-2", contextos: 5, mensagens: 120, preferencias: 1, ultima_escrita: agoIso(60 * 26) },
-    ],
-    limites: {
-      escritas_hoje: 14,
-      escritas_max: 300,
-      bytes_hoje: 52000,
-      bytes_max: 4194304,
-      total_bytes: 1200000,
-      total_max: 209715200,
-    },
-  }),
-};
-
 // ---------- status ----------
 async function fetchSaude() {
-  if (IS_DEMO) return { online: true, versao: "0.1.0" };
+  if (NOT_CONFIGURED) return { online: false, naoConfigurado: true };
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 5000);
   try {
@@ -180,10 +144,7 @@ function takeTransaction() {
 
 function loginClick(btn) {
   btn.addEventListener("click", () => {
-    if (IS_DEMO) {
-      location.assign("painel.html?demo=1");
-      return;
-    }
+    if (NOT_CONFIGURED) return;
     btn.disabled = true;
     startLogin().catch(() => {
       btn.disabled = false;

@@ -370,7 +370,6 @@ def preflight(edge, path, method="POST", origin=VERCEL, req_headers="authorizati
     ("path", "method", "allowed"),
     [
         ("/oauth/token", "POST", "POST"),
-        ("/saude", "GET", "GET"),
         ("/api/painel/conexoes", "GET", "GET, POST"),
         ("/api/painel/revogar", "POST", "GET, POST"),
     ],
@@ -389,7 +388,77 @@ def test_preflight_certo(path, method, allowed):
 
 def test_preflight_sem_headers_pedidos():
     edge, _ = make()
-    assert preflight(edge, "/saude", "GET", req_headers=None).status == 204
+    assert preflight(edge, "/oauth/token", "POST", req_headers=None).status == 204
+
+
+@pytest.mark.parametrize("origin", [VERCEL, "https://mal.example", "http://localhost:3000"])
+def test_preflight_saude_qualquer_origin(origin):
+    edge, app = make(vercel=None)
+    r = preflight(edge, "/saude", "GET", origin=origin, req_headers=None)
+    assert r.status == 204 and app.calls == 0
+    assert r.header("access-control-allow-origin") == "*"
+    assert r.header("access-control-allow-methods") == "GET"
+    assert r.header("access-control-allow-headers") is None
+    assert r.header("access-control-allow-credentials") is None
+    assert r.header("access-control-max-age") == "600"
+    assert_security(r)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"method": "POST"},
+        {"req_headers": "authorization"},
+        {"req_headers": "content-type"},
+        {"req_headers": "x-extra"},
+    ],
+)
+def test_preflight_saude_recusado_403(kwargs):
+    edge, app = make()
+    r = preflight(edge, "/saude", **kwargs)
+    assert r.status == 403 and app.calls == 0
+    assert r.header("access-control-allow-origin") is None
+    assert_security(r)
+
+
+def test_saude_qualquer_origin_get():
+    edge, _ = make(vercel=None)
+    for origin in (VERCEL, "https://mal.example", "null"):
+        r = call(edge, path="/saude", headers=[("origin", origin)])
+        assert r.status == 200
+        assert r.header("access-control-allow-origin") == "*"
+        assert r.header("vary") == "Origin"
+        assert_security(r)
+    r = call(edge, path="/saude")
+    assert r.status == 200 and r.header("access-control-allow-origin") == "*"
+
+
+def test_rotas_com_origin_estranha_nao_recebem_acao():
+    edge, _ = make()
+    r = call(edge, "POST", "/oauth/token", [("origin", "https://mal.example")])
+    assert r.header("access-control-allow-origin") is None
+    assert_security(r)
+    r = call(edge, "GET", "/api/painel/conexoes", [("origin", "https://mal.example")])
+    assert r.status == 401 and r.header("access-control-allow-origin") is None
+    assert_security(r)
+
+
+def test_nenhuma_resposta_tem_allow_credentials():
+    events = []
+    edge, _ = make("html", events=events)
+    respostas = [
+        call(edge, path="/saude", headers=[("origin", VERCEL)]),
+        call(edge, path="/saude", headers=[("origin", "https://mal.example")]),
+        call(edge, "POST", "/oauth/token", [("origin", VERCEL)]),
+        call(edge, "GET", "/api/painel/conexoes", [("origin", VERCEL)]),
+        call(edge, "GET", "/nada"),
+        call(edge, "POST", "/saude", [("origin", VERCEL)]),
+        preflight(edge, "/saude", "GET", req_headers=None),
+        preflight(edge, "/saude", "POST"),
+        preflight(edge, "/oauth/token", "POST"),
+    ]
+    for r in respostas:
+        assert r.header("access-control-allow-credentials") is None
 
 
 @pytest.mark.parametrize(
@@ -422,9 +491,9 @@ def test_preflight_sem_origin_ou_sem_metodo_403():
     assert call(edge, "OPTIONS", "/saude", [("origin", VERCEL)]).status == 403
 
 
-def test_preflight_sem_vercel_no_config_403():
+def test_preflight_oauth_sem_vercel_no_config_403():
     edge, _ = make(vercel=None)
-    assert preflight(edge, "/saude", "GET").status == 403
+    assert preflight(edge, "/oauth/token", "POST").status == 403
 
 
 def test_preflight_rota_inexistente_404():
@@ -436,10 +505,10 @@ def test_resposta_normal_cors():
     edge, _ = make()
     r = call(edge, path="/saude", headers=[("origin", VERCEL)])
     assert r.status == 200
-    assert r.header("access-control-allow-origin") == VERCEL
+    assert r.header("access-control-allow-origin") == "*"
     assert r.header("vary") == "Origin"
     r = call(edge, path="/saude", headers=[("origin", "https://mal.example")])
-    assert r.status == 200 and r.header("access-control-allow-origin") is None
+    assert r.status == 200 and r.header("access-control-allow-origin") == "*"
 
 
 def test_rota_sem_cors_nao_ganha_cors():
@@ -459,7 +528,9 @@ def test_401_do_painel_legivel_pela_vercel():
 def test_borda_manda_nos_headers_do_app():
     edge, _ = make("html")
     r = call(edge, path="/saude", headers=[("origin", VERCEL)])
-    assert r.header("access-control-allow-origin") == VERCEL  # o "*" do app some
+    # O app manda "*" e Allow-Credentials; a borda troca o ACAO por "*" da própria política
+    # e tira Allow-Credentials.
+    assert r.header("access-control-allow-origin") == "*"
     assert_security(r, html=True)
 
 
@@ -795,7 +866,7 @@ def test_eventos_tem_nomes_fixos():
     call(edge, path="/nada")
     call(edge, "POST", "/mcp")
     call(edge, path="/saude")
-    preflight(edge, "/saude", "GET")
+    preflight(edge, "/saude", "GET", req_headers=None)
     assert events == [
         ("host_invalido", 421),
         ("rota_inexistente", 404),
@@ -1101,3 +1172,16 @@ def test_anonymous_body_pools_are_isolated(saturated, other):
     response = call(edge, method="POST", path=blocked, headers=headers)
     assert response.status == 503
     assert response.header("retry-after") == "1"
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"cors": False, "cors_any": True},
+        {"cors": True, "cors_any": True, "category": "form"},
+    ],
+)
+def test_route_rule_cors_any_so_publica_com_cors(kwargs):
+    base = {"method": "GET", "path": "/saude", "category": "public"}
+    with pytest.raises(ValueError, match="cors_any"):
+        RouteRule(**{**base, **kwargs})

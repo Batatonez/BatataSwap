@@ -74,3 +74,13 @@ def test_csp_sem_curinga():
     cfg = json.loads((WEB / "vercel.json").read_text(encoding="utf-8"))
     headers = {h["key"]: h["value"] for r in cfg["headers"] for h in r["headers"]}
     assert "*" not in headers["Content-Security-Policy"]
+
+
+def test_sem_modo_demonstracao():
+    proibidos = ["demo", "demonstração", "demonstracao", "dados de mentira"]
+    for p in WEB.rglob("*"):
+        if not p.is_file():
+            continue
+        txt = (p.name + "\n" + p.read_text(encoding="utf-8", errors="ignore")).lower()
+        for termo in proibidos:
+            assert termo not in txt, f"{p.name}: contém {termo!r}"

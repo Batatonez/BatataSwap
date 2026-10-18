@@ -20,7 +20,9 @@ function fillStatus() {
   box.append(el("span", { class: "dot wait" }), el("span", { text: "Verificando…" }));
   fetchSaude().then((s) => {
     clear(box);
-    if (s.online) {
+    if (s.naoConfigurado) {
+      box.append(el("span", { class: "dot bad" }), el("span", { text: "Servidor não configurado" }));
+    } else if (s.online) {
       box.append(
         el("span", { class: "dot ok" }),
         el("span", { text: "Online" }),
@@ -45,9 +47,14 @@ function fillTools() {
 }
 
 function fillConnect() {
-  const url = (API_BASE || "https://SEU-SERVIDOR.ts.net") + "/mcp";
-  document.getElementById("mcp-url").textContent = url;
   const copyUrl = document.getElementById("copy-url");
+  if (NOT_CONFIGURED) {
+    document.getElementById("mcp-url").textContent = "Servidor não configurado";
+    copyUrl.disabled = true;
+    return;
+  }
+  const url = API_BASE + "/mcp";
+  document.getElementById("mcp-url").textContent = url;
   wireCopy(copyUrl, () => url);
 }
 
@@ -66,7 +73,6 @@ function wireCopy(btn, getText) {
   });
 }
 
-showDemoBanner();
 fillStatus();
 fillTools();
 fillConnect();
@@ -74,3 +80,7 @@ document.getElementById("frase").textContent = FRASE;
 wireCopy(document.getElementById("copy-frase"), () => FRASE);
 loginClick(document.getElementById("entrar"));
 loginClick(document.getElementById("entrar2"));
+if (NOT_CONFIGURED) {
+  document.getElementById("entrar").disabled = true;
+  document.getElementById("entrar2").disabled = true;
+}

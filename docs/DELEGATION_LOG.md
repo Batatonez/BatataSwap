@@ -70,3 +70,5 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-18 | T13b Ensaio com o Claude real (2 contas, web + app + Claude Code) | 3 | Davi + orquestrador | ok: passagem conta-1 → conta-2 funcionando |
 | 2026-10-18 | Correções da 2ª passada do Opus (N1 pools/espera, N2 tag HMAC no access token + limiter, N3 escape de terminal + recusa de C0/C1, S-N4..N8) | 3 | gpt-6.1-sol (Codex) + worker-sonnet (2 testes desatualizados) | ok (741 testes) |
 | 2026-10-18 | Davi decidiu NÃO fazer `registrar_uso` (uso do plano não tem API; raspagem fora de questão) | — | — | — |
+| 2026-10-18 | /saude com CORS aberto (status ao vivo sem ligar o painel) | 2 | worker-haiku | ok |
+| 2026-10-18 | Site sem modo demonstração (pedido do Davi: nada de dado falso) | 2 | worker-sonnet | ok (753 testes no total) |

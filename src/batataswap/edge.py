@@ -100,7 +100,9 @@ class RouteRule:
 
     ``path`` é exato, ou termina em ``/*`` para casar um ou mais segmentos depois do prefixo.
     ``GET`` também cobre ``HEAD`` (como no Starlette). ``cors`` diz se a rota responde CORS
-    para a origem da Vercel. ``static`` mantém o ``Cache-Control`` que o app mandar.
+    para a origem da Vercel. ``cors_any`` (exige ``cors``) diz que a rota responde CORS para
+    qualquer Origin com ``*``, sem credenciais; só serve para rota pública e sem dado sensível
+    (hoje, só ``/saude``). ``static`` mantém o ``Cache-Control`` que o app mandar.
     """
 
     method: str
@@ -108,12 +110,15 @@ class RouteRule:
     category: str
     cors: bool = False
     static: bool = False
+    cors_any: bool = False
 
     def __post_init__(self):
         if self.method not in METHODS:
             raise ValueError("RouteRule.method: método não suportado.")
         if self.category not in CATEGORIES:
             raise ValueError("RouteRule.category: categoria desconhecida.")
+        if self.cors_any and (not self.cors or self.category != "public"):
+            raise ValueError("RouteRule.cors_any: exige cors e categoria public.")
         base = self.path.removesuffix("/*")
         if (
             not self.path.startswith("/")
@@ -211,7 +216,7 @@ class RoutePolicy:
                 RouteRule("POST", "/api/painel/*", "bearer:painel", cors=True),
                 RouteRule("GET", "/painel/*", "cookie"),
                 RouteRule("POST", "/painel/*", "form"),
-                RouteRule("GET", "/saude", "public", cors=True),
+                RouteRule("GET", "/saude", "public", cors=True, cors_any=True),
                 RouteRule("GET", "/static/*", "public", static=True),
             ]
         )
@@ -427,9 +432,7 @@ class EdgeMiddleware:
 
         origins = values(b"origin")
         origin = origins[0].decode("latin-1") if len(origins) == 1 else None
-        cors_origin = (
-            origin if cors and self._vercel is not None and origin == self._vercel else None
-        )
+        cors_origin = self._cors_origin(cors_rules, origin)
 
         # 2. CORS/preflight, antes de qualquer credencial.
         if method == "OPTIONS":
@@ -451,8 +454,7 @@ class EdgeMiddleware:
                 extra=[(b"allow", ", ".join(sorted(allowed)).encode())],
             )
         cors = rule.cors
-        if not cors:
-            cors_origin = None
+        cors_origin = self._cors_origin([rule], origin) if cors else None
 
         # 3. Origin.
         if not self._origin_ok(rule, method, origins):
@@ -711,6 +713,14 @@ class EdgeMiddleware:
                     return True
         return False
 
+    def _cors_origin(self, rules, origin: str | None) -> str | None:
+        """Valor de ``Access-Control-Allow-Origin`` para as regras pedidas, ou ``None``."""
+        if any(r.cors_any for r in rules):
+            return "*"
+        if any(r.cors for r in rules) and self._vercel is not None and origin == self._vercel:
+            return self._vercel
+        return None
+
     async def _preflight(self, send, cors_rules, origins, values):
         if not cors_rules:
             return await self._send_error(send, 403, "preflight_recusado")
@@ -718,6 +728,28 @@ class EdgeMiddleware:
         req_methods = values(b"access-control-request-method")
         req_headers = b",".join(values(b"access-control-request-headers")).decode("latin-1")
         asked = {h.strip().lower() for h in req_headers.split(",") if h.strip()}
+        if all(r.cors_any for r in cors_rules):
+            # Rota aberta (/saude): qualquer Origin, só GET, nenhum header pedido, sem credenciais.
+            if (
+                len(origins) != 1
+                or len(req_methods) != 1
+                or req_methods[0].decode("latin-1") not in methods
+                or asked
+            ):
+                return await self._send_error(send, 403, "preflight_recusado")
+            self._emit("preflight_aceito", 204)
+            headers = self._finalize(
+                [],
+                extra=[
+                    (b"access-control-allow-origin", b"*"),
+                    (b"access-control-allow-methods", ", ".join(methods).encode()),
+                    (b"access-control-max-age", b"600"),
+                    (b"vary", b"Origin"),
+                ],
+            )
+            await send({"type": "http.response.start", "status": 204, "headers": headers})
+            await send({"type": "http.response.body", "body": b""})
+            return
         if (
             self._vercel is None
             or len(origins) != 1

@@ -37,7 +37,6 @@ function setToken(token, expiresInSec) {
 class Expired extends Error {}
 
 async function api(path, options) {
-  if (IS_DEMO) return null;
   const opts = Object.assign({ credentials: "omit", cache: "no-store" }, options);
   opts.headers = Object.assign({ Authorization: "Bearer " + accessToken }, opts.headers);
   const r = await fetch(API_BASE + path, opts);
@@ -45,8 +44,7 @@ async function api(path, options) {
   return r;
 }
 
-async function getJson(path, demoData) {
-  if (IS_DEMO) return demoData();
+async function getJson(path) {
   const r = await api(path);
   if (!r.ok) throw new Error("Erro " + r.status + " ao ler o servidor.");
   return r.json();
@@ -157,8 +155,8 @@ async function load() {
   const mine = session;
   try {
     const [con, ati] = await Promise.all([
-      getJson("/api/painel/conexoes", DEMO.conexoes),
-      getJson("/api/painel/atividade", DEMO.atividade),
+      getJson("/api/painel/conexoes"),
+      getJson("/api/painel/atividade"),
     ]);
     if (mine !== session) return; // saiu ou expirou enquanto carregava
     renderCards(con.conexoes || [], ati.por_conta || []);
@@ -170,7 +168,8 @@ async function load() {
   } catch (e) {
     if (mine !== session) return;
     if (e instanceof Expired) showLogin("Sessão expirada. Entre de novo.");
-    else showLogin("Não consegui carregar os dados do servidor.");
+    else if (e instanceof TypeError) showLogin("Não consegui falar com o servidor.");
+    else showLogin(e && e.message ? e.message : "Não consegui carregar os dados do servidor.");
   }
 }
 
@@ -196,24 +195,20 @@ async function submitRevoke(ev) {
   }
   $("dlg-ok").disabled = true;
   try {
-    if (IS_DEMO) {
-      DEMO_REVOKED.add(revokeTarget);
-    } else {
-      const r = await api("/api/painel/revogar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rotulo: revokeTarget, totp: code }),
-      });
-      if (r.status === 403) {
-        erro.textContent = "Código inválido. Tente o próximo código do autenticador.";
-        erro.hidden = false;
-        return;
-      }
-      if (r.status !== 204) {
-        erro.textContent = "O servidor respondeu " + r.status + ".";
-        erro.hidden = false;
-        return;
-      }
+    const r = await api("/api/painel/revogar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rotulo: revokeTarget, totp: code }),
+    });
+    if (r.status === 403) {
+      erro.textContent = "Código inválido. Tente o próximo código do autenticador.";
+      erro.hidden = false;
+      return;
+    }
+    if (r.status !== 204) {
+      erro.textContent = "O servidor respondeu " + r.status + ".";
+      erro.hidden = false;
+      return;
     }
     $("dlg").close();
     await load();
@@ -230,27 +225,14 @@ async function submitRevoke(ev) {
   }
 }
 
-// No demo, "desconectar" só marca na memória da página.
-const DEMO_REVOKED = new Set();
-if (IS_DEMO) {
-  const orig = DEMO.conexoes;
-  DEMO.conexoes = () => {
-    const d = orig();
-    for (const c of d.conexoes) if (DEMO_REVOKED.has(c.rotulo)) c.ativo = false;
-    return d;
-  };
-}
-
 // ---------- início ----------
-showDemoBanner();
 loginClick($("entrar"));
-$("sair").addEventListener("click", () => {
-  if (IS_DEMO) location.assign("/");
-  else showLogin("Você saiu.");
-});
+$("sair").addEventListener("click", () => showLogin("Você saiu."));
 $("dlg-cancelar").addEventListener("click", () => $("dlg").close());
 $("dlg-form").addEventListener("submit", submitRevoke);
 
-if (IS_DEMO) load();
-else if (location.pathname.replace(/\/+$/, "").endsWith("/callback")) handleCallback();
+if (NOT_CONFIGURED) {
+  showLogin("Servidor não configurado.");
+  $("entrar").disabled = true;
+} else if (location.pathname.replace(/\/+$/, "").endsWith("/callback")) handleCallback();
 else showLogin("");

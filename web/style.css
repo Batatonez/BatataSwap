@@ -44,14 +44,6 @@ code { background: var(--paper); border: 1px solid var(--line); border-radius: 3
 q { quotes: "“" "”"; font-style: italic; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
-.demo {
-  background: repeating-linear-gradient(135deg, var(--paper) 0 10px, var(--line) 10px 20px);
-  color: var(--fg); border-bottom: 1px solid var(--fg);
-  text-align: center; padding: .3rem 1rem; font: 500 .78rem/1.5 var(--mono);
-  text-transform: uppercase; letter-spacing: .12em;
-}
-.demo:not([hidden]) { display: block; }
-
 .top { border-bottom: 1px solid var(--fg); }
 .bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1.5rem; padding-top: .9rem; padding-bottom: .9rem; }
 .brand { display: flex; align-items: center; gap: .6rem; font: 700 1.3rem/1 var(--serif); color: var(--fg); text-decoration: none; }
