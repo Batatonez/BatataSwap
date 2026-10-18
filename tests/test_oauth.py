@@ -791,6 +791,16 @@ def test_refresh_reuse_revokes_family(env):
     assert env.conn.execute("SELECT revoked_at FROM oauth_grants").fetchone()[0] == NOW + 200
     events = [r[0] for r in env.conn.execute("SELECT event FROM audit ORDER BY id")]
     assert "refresh_reuso" in events
+    changes = env.conn.total_changes
+    for _ in range(5):
+        with pytest.raises(oauth.OAuthError) as replay:
+            refresh(env, tokens.refresh_token, NOW + 300)
+        assert replay.value.error == "invalid_grant"
+    assert env.conn.total_changes == changes
+    assert (
+        env.conn.execute("SELECT count(*) FROM audit WHERE event='refresh_reuso'").fetchone()[0]
+        == 1
+    )
 
 
 def test_refresh_concurrent_single_winner(env):

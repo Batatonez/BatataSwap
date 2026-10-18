@@ -850,6 +850,8 @@ def _refresh(conn, config: Config, params, now: int) -> TokenResponse:
         ) = row
         if grant_client != client_id:
             raise _err("invalid_grant", "refresh emitido para outro cliente")
+        if token_revoked is not None or grant_revoked is not None:
+            raise _err("invalid_grant", "autorizacao revogada ou expirada")
         if used_at is not None:
             successor = conn.execute(
                 "SELECT s.used_at FROM oauth_tokens t JOIN oauth_tokens s "

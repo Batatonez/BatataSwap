@@ -250,6 +250,12 @@ def append_messages(
                     size,
                 ),
             )
+        from batataswap.tools import check_record_readable
+
+        for seq in range(first_seq, last_seq + 1):
+            page = read_conversation(conn, keyring, conv_name, 1, seq + 1)
+            record = page.pop("itens")[0]
+            check_record_readable(limits, record, **page)
         conn.execute(
             "UPDATE conversations SET updated_at = ?, total_bytes = total_bytes + ?, "
             "project_id = ? WHERE id = ?",

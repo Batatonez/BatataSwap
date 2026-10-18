@@ -60,6 +60,18 @@ def response_size(response):
     return len(response.model_dump_json(by_alias=True, exclude_none=True).encode("utf-8")) + 1024
 
 
+def check_record_readable(limits, record, **metadata):
+    """Mede a mesma resposta de leitura; reserva espaço para paginação/envelope."""
+    response = result(
+        {"registros": [record], "truncado": False, "proximo_cursor": None, **metadata},
+        saved=True,
+    )
+    if response_size(response) + 4096 > limits.tool_response_chars:
+        raise mem.LimitExceeded(
+            "O registro excede o limite da resposta de leitura. Reduza o texto. Nada foi gravado."
+        )
+
+
 def schemas(limits):
     def text(n, minimum=1):
         return {"type": "string", "minLength": minimum, "maxLength": n}

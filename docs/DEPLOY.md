@@ -355,8 +355,12 @@ um reenvio de lote antigo após migrar pode duplicá-las. Novas chaves ficam som
 
 O serve usa h11, sem WebSocket, com `limit_concurrency=512`. A borda valida o Bearer
 no RS antes de ler o corpo de `/mcp` e `/api/painel/*`. Leituras sem Bearer validado
-têm 16 vagas independentes (excesso recebe 503 imediato), até 8 KiB e prazo total de
-3 segundos. DoS volumétrico residual é aceito: conexões antes dos headers, saturação
+usam pools separados: `/oauth/token` tem 8 vagas, 4 KiB e prazo de 2 s;
+`/oauth/login` e `/oauth/consent` compartilham 8 vagas, 8 KiB e 3 s; o resto tem
+4 vagas, até 8 KiB e 3 s. Excesso recebe 503 imediato com `Retry-After: 1`.
+GET/HEAD sem corpo (Content-Length ausente ou zero e sem Transfer-Encoding) não
+ocupam vagas de corpo. Saturar o pool de `/oauth/token` pode atrasar renovações:
+o Claude refaz o refresh e, no pior caso, o Davi reconecta. DoS volumétrico residual é aceito: conexões antes dos headers, saturação
 das 512 conexões, banda e recursos do Funnel ainda podem impedir acesso legítimo.
 Esses limites não substituem proteção volumétrica externa.
 

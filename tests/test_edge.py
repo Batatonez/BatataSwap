@@ -610,8 +610,8 @@ def test_streaming_sem_credencial_estoura_8k():
 
 def test_streaming_dentro_do_teto_passa():
     edge, _ = make()
-    r = call(edge, "POST", "/oauth/token", chunks=(b"x" * 4096, b"x" * 4096))
-    assert r.status == 200 and r.json()["body"] == 8192
+    r = call(edge, "POST", "/oauth/token", chunks=(b"x" * 2048, b"x" * 2048))
+    assert r.status == 200 and r.json()["body"] == 4096
 
 
 def test_content_length_mentiroso_nao_engana():
@@ -709,8 +709,8 @@ def test_corpo_grande_nao_chega_no_handler(mode):
 
 def test_handler_que_responde_antes_de_ler_recebe_corpo_inteiro():
     edge, _ = make("early")
-    r = call(edge, "POST", "/oauth/token", chunks=(b"x" * 3000, b"x" * 3000))
-    assert r.status == 200 and r.body == b"6000"
+    r = call(edge, "POST", "/oauth/token", chunks=(b"x" * 2000, b"x" * 2000))
+    assert r.status == 200 and r.body == b"4000"
 
 
 def test_handler_que_captura_excecao_recebe_corpo_pequeno():
@@ -996,7 +996,7 @@ def test_body_deadlines(slow):
             sent.append(message)
 
         await edge._forward(
-            {},
+            {"path": "/saude"},
             receive,
             send,
             RoutePolicy.default().for_path("/saude")[0],
@@ -1050,7 +1050,7 @@ def test_slowloris_64_anonymous_readers_preserves_bearer(env):  # noqa: F811
                 nonlocal entered
                 if slow:
                     entered += 1
-                    if entered == 16:
+                    if entered == 8:
                         full.set()
                     await unblock.wait()
                 return {"type": "http.request", "body": b"{}", "more_body": False}
@@ -1064,17 +1064,34 @@ def test_slowloris_64_anonymous_readers_preserves_bearer(env):  # noqa: F811
         readers = [asyncio.create_task(request("/oauth/token", slow=True)) for _ in range(64)]
         await asyncio.wait_for(full.wait(), 1)
         await asyncio.sleep(0)
-        assert sum(t.done() for t in readers) == 48
+        assert sum(t.done() for t in readers) == 56
         assert await asyncio.wait_for(request("/mcp", access), 1) == 200
         # Bearer com formato válido, porém desconhecido, não chega a ler o corpo.
         assert await asyncio.wait_for(request("/mcp", "B" * 32, slow=True), 1) == 401
         assert validated == ["mcp", "mcp"]
-        assert entered == 16
+        assert entered == 8
         unblock.set()
         statuses = await asyncio.gather(*readers)
-        assert statuses.count(503) == 48
-        assert statuses.count(200) == 16
-        assert edge._body_slots._value == 16
-        assert toy.calls == 17
+        assert statuses.count(503) == 56
+        assert statuses.count(200) == 8
+        assert edge._body_slots["token"]._value == 8
+        assert toy.calls == 9
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("saturated,other", [("forms", "/oauth/token"), ("token", "/oauth/login")])
+def test_anonymous_body_pools_are_isolated(saturated, other):
+    edge, _ = make()
+    pool = edge._body_slots[saturated]
+    pool._value = 0
+    assert call(edge, path="/saude").status == 200
+    assert call(edge, path="/oauth/authorize").status == 200
+    assert call(edge, method="HEAD", path="/saude").status == 200
+    headers = [("origin", ORIGIN)] if other == "/oauth/login" else []
+    assert call(edge, method="POST", path=other, headers=headers).status == 200
+    blocked = "/oauth/token" if saturated == "token" else "/oauth/login"
+    headers = [("origin", ORIGIN)] if saturated == "forms" else []
+    response = call(edge, method="POST", path=blocked, headers=headers)
+    assert response.status == 503
+    assert response.header("retry-after") == "1"

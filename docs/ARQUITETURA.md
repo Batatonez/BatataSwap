@@ -181,7 +181,7 @@ No fim do consentimento, numa única transação do banco: marca a transação c
 Invariantes (cada uma com teste, inclusive de concorrência):
 - **Código**: `BEGIN IMMEDIATE` → confere `used_at IS NULL`, prazo, client, redirect, `resource` e PKCE → marca usado → emite os tokens, **na mesma transação**. Código reusado → revoga os tokens já emitidos com ele (RFC 9700 §4.2.4).
 - **Refresh**: na mesma transação, confere hash, `used_at IS NULL`, `revoked_at IS NULL`, prazo, client, recurso e teto do grant; marca usado e emite o par novo, ligado à mesma `family_id`. **Scope**: omitido → herda o do grant; presente → tem que ser subconjunto do grant, senão `invalid_scope`. `resource` presente tem que ser igual ao do grant.
-  - Refresh **já usado** → revoga a família inteira e o grant pede login de novo (evento `refresh_reuso`). Não há janela de tolerância: se a resposta se perder, o Claude pede pro Davi reconectar. Isso é raro e seguro.
+  - Refresh **já usado** → revoga a família inteira e o grant pede login de novo (evento `refresh_reuso`). Há tolerância de 60 s para repetição concorrente enquanto o sucessor não foi usado: retorna `invalid_grant` sem revogar. A janela não recupera resposta perdida; nesse caso o Davi pode precisar reconectar. Refresh já revogado é recusado sem escrita ou audit; `refresh_reuso` ocorre somente na primeira revogação.
   - Os hashes de refresh usados ficam guardados **até a família expirar**, para detectar reuso; depois, uma faxina diária apaga.
 - **TOTP** (`totp_last_step`) e **confirmação de apagar**: consumo atômico (`UPDATE … WHERE … AND used_at IS NULL` + conferir `rowcount`).
 - Token nunca é aceito na query string. Comparação sempre pelo hash (sem comparar o texto com `==`).
@@ -864,3 +864,18 @@ Tomadas pelo orquestrador depois da revisão T01 (o Davi pode mudar):
 | S1 | Sugestão | AAD com origem CLI/painel | §6 |
 | S2 | Sugestão | Tamanho exato do challenge S256 | §4.2 |
 | S3 | Sugestão | Scope omitido no refresh | §4.3 |
+
+
+### Isolamento de leitores anônimos e tamanho de leitura
+
+GET/HEAD sem corpo (Content-Length ausente ou zero, sem Transfer-Encoding) não
+ocupam vagas de leitura de corpo. `/oauth/token` tem pool de 8 vagas, teto de 4 KiB
+e prazo de 2 s; `/oauth/login` e `/oauth/consent` compartilham 8 vagas, 8 KiB e 3 s;
+o restante tem 4 vagas, até 8 KiB e 3 s. Excesso retorna 503 com `Retry-After: 1`.
+Permanece DoS volumétrico residual: saturar o pool de `/oauth/token` atrasa renovações;
+o Claude refaz o refresh e, no pior caso, o Davi reconecta. Banda, Funnel e conexões
+antes dos headers também permanecem limites externos.
+
+Gravações de contexto, preferência e mensagens medem a resposta real de leitura de
+cada registro, incluindo content e structuredContent, escapes e folga para paginação.
+Se exceder `tool_response_chars`, toda a transação é desfeita com erro explícito.

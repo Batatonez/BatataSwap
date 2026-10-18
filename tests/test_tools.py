@@ -191,7 +191,7 @@ def test_truncation_cursor_and_thread(connected, monkeypatch):
 
     monkeypatch.setattr(memory, "add_preference", checked)
     deps = app.state.oauth_deps
-    deps.config = replace(deps.config, limits=replace(deps.config.limits, tool_response_chars=6000))
+    deps.config = replace(deps.config, limits=replace(deps.config.limits, tool_response_chars=8192))
 
     async def run():
         token = request_actor.set(actor)
@@ -202,20 +202,22 @@ def test_truncation_cursor_and_thread(connected, monkeypatch):
                     await call("registrar_preferencia", {"texto": str(i) + "x" * 500})
                 ).is_error
             assert not (await call("salvar_contexto", CONTEXT)).is_error
-            cursor, ids = None, []
+            cursor, ids, pages = None, [], 0
             for _ in range(10):
                 args = {"projeto": "Projeto"}
                 if cursor:
                     args["cursor"] = cursor
                 response = await call("buscar_contexto", args)
-                assert response_size(response) <= 6000
+                assert response_size(response) <= 8192
                 data = saved(response)
                 ids.extend(item["id"] for item in data["registros"])
+                pages += 1
                 cursor = data["proximo_cursor"]
                 if not cursor:
                     break
                 assert data["truncado"] is True
             assert cursor is None
+            assert pages > 1
             assert len(ids) == len(set(ids)) == 6
             assert (await call("listar_projetos", {"cursor": "fraude"})).is_error
             assert (
@@ -573,3 +575,23 @@ def test_optional_null_is_absent():
     assert args == {"id": "pref_x"}
     with pytest.raises(InvalidInput):
         _validate({"id": None}, schema)
+
+
+def test_context_escape_size_rejected_before_commit(connected):
+    from batataswap import memory, tools
+
+    app, _, actor = connected
+    deps = app.state.oauth_deps
+    conn = deps.connect()
+    try:
+        large = {**CONTEXT, "resumo": "\x7f" * 8000, "decisoes": ["\x7f" * 500] * 40}
+        with pytest.raises(memory.LimitExceeded, match="limite da resposta de leitura"):
+            tools._execute(conn, deps, actor, "salvar_contexto", large, NOW)
+        assert conn.execute("SELECT count(*) FROM contexts").fetchone()[0] == 0
+        normal = {**large, "resumo": "a" * 8000, "decisoes": ["b" * 500] * 40}
+        assert not tools._execute(conn, deps, actor, "salvar_contexto", normal, NOW).is_error
+        response = tools._execute(conn, deps, actor, "buscar_contexto", {"projeto": "Projeto"}, NOW)
+        assert saved(response)["registros"][0]["resumo"] == normal["resumo"]
+        assert response_size(response) <= 140000
+    finally:
+        conn.close()

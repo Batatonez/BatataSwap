@@ -412,6 +412,11 @@ def save_context(
                 len(plain),
             ),
         )
+        from batataswap.tools import check_record_readable
+
+        check_record_readable(
+            limits, {"tipo": "contexto", **get_context(conn, keyring, name, version)}
+        )
     return {
         "id": public_id,
         "projeto_id": project_public,
@@ -557,6 +562,19 @@ def add_preference(
                 raise NotFound("Preferência a substituir não encontrada.")
             supersedes_id, version = old[0], old[1] + 1
         public_id = crypto.new_public_id("pref_")
+        from batataswap.tools import check_record_readable
+
+        check_record_readable(
+            limits,
+            {
+                "tipo": "preferencia",
+                "id": public_id,
+                "versao": version,
+                "salvo_em": iso(now),
+                "enviado_por": actor.source_label,
+                "texto": text,
+            },
+        )
         aad = crypto.aad_preference(public_id, version, origin, actor.source_label, now)
         conn.execute(
             "INSERT INTO preferences(public_id, supersedes_id, version, created_at, grant_id, "

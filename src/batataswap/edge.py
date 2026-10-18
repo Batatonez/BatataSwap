@@ -249,7 +249,11 @@ class EdgeMiddleware:
         if not isinstance(config, Config) or not isinstance(routes, RoutePolicy):
             raise TypeError("EdgeMiddleware: config e routes são obrigatórios.")
         self.bearer_validator = bearer_validator
-        self._body_slots = asyncio.Semaphore(16)
+        self._body_slots = {
+            "token": asyncio.Semaphore(8),
+            "forms": asyncio.Semaphore(8),
+            "other": asyncio.Semaphore(4),
+        }
         self.app = app
         self.body_total_timeout = body_total_timeout
         self.body_idle_timeout = body_idle_timeout
@@ -494,6 +498,8 @@ class EdgeMiddleware:
             limit = self.config.limits.unauthenticated_mcp_body_bytes
         if not rule.category.startswith("bearer:"):
             limit = min(limit, 8192)
+        if scope["path"] == "/oauth/token" and not rule.category.startswith("bearer:"):
+            limit = min(limit, 4096)
         lengths = values(b"content-length")
         if len(lengths) > 1 or (
             lengths and not _CONTENT_LENGTH.fullmatch(lengths[0].decode("latin-1"))
@@ -507,19 +513,37 @@ class EdgeMiddleware:
             )
 
         anonymous = not rule.category.startswith("bearer:")
-        if anonymous:
-            if self._body_slots.locked():
+        bodyless = (
+            scope["method"] in {"GET", "HEAD"}
+            and (not lengths or int(lengths[0]) == 0)
+            and not values(b"transfer-encoding")
+        )
+        pool = self._body_slots[
+            "token"
+            if scope["path"] == "/oauth/token"
+            else "forms"
+            if scope["path"] in {"/oauth/login", "/oauth/consent"}
+            else "other"
+        ]
+        acquired = anonymous and not bodyless
+        if acquired:
+            if pool.locked():
                 return await self._send_error(
-                    send, 503, "requisicao_invalida", cors=cors, cors_origin=cors_origin
+                    send,
+                    503,
+                    "requisicao_invalida",
+                    cors=cors,
+                    cors_origin=cors_origin,
+                    extra=[(b"retry-after", b"1")],
                 )
             # Sem espera: no mesmo loop, acquire com vaga livre não suspende.
-            await self._body_slots.acquire()
+            await pool.acquire()
         released = False
 
         def release():
             nonlocal released
-            if anonymous and not released:
-                self._body_slots.release()
+            if acquired and not released:
+                pool.release()
                 released = True
 
         try:
@@ -535,7 +559,7 @@ class EdgeMiddleware:
         timeout = self.body_total_timeout
         if not rule.category.startswith("bearer:"):
             limit = min(limit, 8192)
-            timeout = min(timeout, 3)
+            timeout = min(timeout, 2 if scope["path"] == "/oauth/token" else 3)
         deadline = asyncio.get_running_loop().time() + timeout
         while True:
             try:

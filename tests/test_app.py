@@ -177,7 +177,7 @@ def test_config_response_budget(env):
 
     with pytest.raises(ConfigError):
         create_app(
-            replace(env.config, limits=replace(env.config.limits, tool_response_chars=90000)),
+            replace(env.config, limits=replace(env.config.limits, tool_response_chars=4096)),
             env.keyring,
             db_path=env.path,
         )
