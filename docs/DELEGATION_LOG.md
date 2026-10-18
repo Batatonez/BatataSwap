@@ -59,3 +59,4 @@ O orquestrador adiciona uma linha por tarefa. Serve para o Davi ver qual modelo 
 | 2026-10-18 | T12 CLI, backup/restore, logs JSON | 3 | gpt-6.1-sol (Codex) | ok (641 testes rodados pelo orquestrador; o sandbox do Codex trava em cliente HTTP); |
 | 2026-10-18 | Revisão T12 | 3 | worker-opus | 0 crítico, 9 importantes (WAL órfão no restore, erros escondidos, init desiste no 1º TOTP, export em disco, wipe incompleto, eventos de segurança fora do journal, testes), 9 sugestões |
 | 2026-10-18 | Correções T12 | 3 | gpt-6.1-sol (Codex) + worker-haiku (actor no log, evento limite) | ok (694 testes) |
+| 2026-10-18 | T16 Revisão nível 4 (parte OpenAI) | 4 | gpt-6-astra (Codex) | **não expor**: 0 crítico, 6 importantes (DoS por corpo incompleto, cotas operacionais, bloqueio do authorize, lixeira sem restauração, lote em texto puro, limite de resposta), 3 sugestões; correções com gpt-6.1-sol; parte Claude (worker-opus) em andamento |
