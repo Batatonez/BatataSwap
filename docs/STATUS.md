@@ -69,3 +69,11 @@ Numa sessão nova (qualquer conta): branch `claude/gallant-ride-wi4aea`, leia `C
 - ~~Repo público × código do BatataLink~~ resolvido: o Davi tirou o BatataLink do projeto. Código todo próprio; repo segue público.
 
 - Aprovação do plano pelo Davi.
+
+## 2026-10-18 — T16, 3ª passada do gpt-6-astra (commit d2c65ab)
+Veredito: "não expor". Nenhum crítico e nenhuma quebra de autenticação ou confidencialidade. Ficaram 2 IMPORTANTES de DoS:
+- **I1**: Bearer `bsw_at_<43>` sem tag HMAC ainda chega ao SQLite. Correção: acabar com a compatibilidade e exigir a tag.
+- **I2**: ondas de corpos incompletos seguram as vagas do pool `/oauth/token` e um refresh legítimo recebe 503. Correção: ler o corpo sem ocupar vaga, com prazo contado desde a entrada, e só depois pegar a vaga.
+- **S1** (sugestão): `logs.py` perde o contador agregado do fim da rajada. Correção: flush periódico e no shutdown.
+
+Em andamento: worker-opus, brief 028. Se a sessão cair antes do commit, refazer a partir desta descrição. Depois: 4ª passada do gpt-6-astra só nesses pontos.
