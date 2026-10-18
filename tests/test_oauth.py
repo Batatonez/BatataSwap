@@ -233,7 +233,9 @@ def test_authorize_local_errors_never_redirect(env, changes):
     _, challenge = pkce()
     fetcher = FakeFetcher()
     with pytest.raises(oauth.LocalError):
-        oauth.validate_authorize(env.conn, env.config, claude_params(challenge, **changes), fetcher, NOW)
+        oauth.validate_authorize(
+            env.conn, env.config, claude_params(challenge, **changes), fetcher, NOW
+        )
     if changes.get("client_id", CLAUDE_CIMD_CLIENT_ID) != CLAUDE_CIMD_CLIENT_ID:
         assert fetcher.calls == []  # fora da lista: nem toca na rede
 
@@ -348,7 +350,9 @@ def test_scope_default_and_canonical(env):
 
 def test_pending_transactions_capped(env):
     _, challenge = pkce()
-    req = oauth.validate_authorize(env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW)
+    req = oauth.validate_authorize(
+        env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW
+    )
     created = [
         oauth.create_transaction(env.conn, env.keyring, req, None, NOW + i, 20) for i in range(25)
     ]
@@ -356,7 +360,13 @@ def test_pending_transactions_capped(env):
     for tx, alive in ((created[0], False), (created[4], False), (created[5], True)):
         try:
             oauth.load_transaction(
-                env.conn, env.config, env.keyring, tx.tx_id, tx.browser, tx.csrf, NOW + 30,
+                env.conn,
+                env.config,
+                env.keyring,
+                tx.tx_id,
+                tx.browser,
+                tx.csrf,
+                NOW + 30,
                 check_csrf=True,
             )
             assert alive
@@ -371,7 +381,9 @@ def test_pending_transactions_capped(env):
 
 def test_transaction_binding(env):
     _, challenge = pkce()
-    req = oauth.validate_authorize(env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW)
+    req = oauth.validate_authorize(
+        env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW
+    )
     tx = oauth.create_transaction(env.conn, env.keyring, req, None, NOW, 20)
     other = oauth.create_transaction(env.conn, env.keyring, req, None, NOW, 20)
     assert tx.browser != other.browser
@@ -415,8 +427,10 @@ def test_two_accounts_and_replace(env):
     assert c1.scope == ("memoria", "offline_access")
 
     # Mesmo rótulo de novo: sem substituir → pergunta; o grant antigo continua valendo.
-    verifier, challenge = pkce()
-    req = oauth.validate_authorize(env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW)
+    _, challenge = pkce()
+    req = oauth.validate_authorize(
+        env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW
+    )
     tx = oauth.create_transaction(env.conn, env.keyring, req, None, NOW, 20)
     loaded = oauth.load_transaction(
         env.conn, env.config, env.keyring, tx.tx_id, tx.browser, tx.csrf, NOW, check_csrf=True
@@ -455,16 +469,16 @@ def test_two_accounts_and_replace(env):
     assert labels == [("conta-1", 0), ("conta-2", 1), ("conta-1", 1)]
     # Transação usada não serve mais.
     with pytest.raises(oauth.TransactionError):
-        oauth.finish_consent(
-            env.conn, env.config, loaded, "conta-1", None, frozenset(), NOW
-        )
+        oauth.finish_consent(env.conn, env.config, loaded, "conta-1", None, frozenset(), NOW)
     events = [r[0] for r in env.conn.execute("SELECT event FROM audit ORDER BY id")]
     assert events.count("grant_criado") == 3 and "grant_revogado" in events
 
 
 def test_invalid_label_rejected(env):
     _, challenge = pkce()
-    req = oauth.validate_authorize(env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW)
+    req = oauth.validate_authorize(
+        env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW
+    )
     tx = oauth.create_transaction(env.conn, env.keyring, req, None, NOW, 20)
     loaded = oauth.load_transaction(
         env.conn, env.config, env.keyring, tx.tx_id, tx.browser, tx.csrf, NOW, check_csrf=True
@@ -477,7 +491,9 @@ def test_invalid_label_rejected(env):
 
 def test_consent_requires_login(env):
     _, challenge = pkce()
-    req = oauth.validate_authorize(env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW)
+    req = oauth.validate_authorize(
+        env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW
+    )
     tx = oauth.create_transaction(env.conn, env.keyring, req, None, NOW, 20)
     loaded = oauth.load_transaction(
         env.conn, env.config, env.keyring, tx.tx_id, tx.browser, tx.csrf, NOW, check_csrf=True
@@ -523,7 +539,9 @@ def test_painel_grant_replaces_previous(env):
     }
     with pytest.raises(oauth.BearerError):
         oauth.validate_bearer(env.conn, first.access_token, ORIGIN + "/api/painel", "painel", NOW)
-    ctx = oauth.validate_bearer(env.conn, second.access_token, ORIGIN + "/api/painel", "painel", NOW)
+    ctx = oauth.validate_bearer(
+        env.conn, second.access_token, ORIGIN + "/api/painel", "painel", NOW
+    )
     assert ctx.label == "painel"
     # Token do painel não vale no /mcp, nem com scope memoria.
     with pytest.raises(oauth.BearerError) as caught:
@@ -555,7 +573,12 @@ def test_code_exchange_happy(env):
     assert tokens.access_token not in repr(tokens) and tokens.refresh_token not in repr(tokens)
     stored = {r[0] for r in env.conn.execute("SELECT token_hash FROM oauth_tokens")}
     assert stored == {token_hash(tokens.access_token), token_hash(tokens.refresh_token)}
-    assert env.conn.execute("SELECT count(*) FROM oauth_codes WHERE code_hash=?", (token_hash(code),)).fetchone()[0] == 1
+    assert (
+        env.conn.execute(
+            "SELECT count(*) FROM oauth_codes WHERE code_hash=?", (token_hash(code),)
+        ).fetchone()[0]
+        == 1
+    )
 
 
 @pytest.mark.parametrize(
@@ -655,16 +678,16 @@ def test_refresh_rotation_inherit_and_subset(env):
     second = refresh(env, tokens.refresh_token, NOW + 100)
     assert second.scope == "memoria offline_access"
     assert second.refresh_token != tokens.refresh_token
-    family = env.conn.execute(
-        "SELECT count(DISTINCT family_id) FROM oauth_tokens"
-    ).fetchone()[0]
+    family = env.conn.execute("SELECT count(DISTINCT family_id) FROM oauth_tokens").fetchone()[0]
     assert family == 1
     third = refresh(env, second.refresh_token, NOW + 200, scope="memoria", resource=ORIGIN + "/mcp")
     assert third.scope == "memoria"
     ctx = oauth.validate_bearer(env.conn, third.access_token, ORIGIN + "/mcp", "memoria", NOW + 200)
     assert ctx.label == "conta-1"
     # O access antigo continua até vencer (não é revogado na rotação).
-    assert oauth.validate_bearer(env.conn, tokens.access_token, ORIGIN + "/mcp", "memoria", NOW + 200)
+    assert oauth.validate_bearer(
+        env.conn, tokens.access_token, ORIGIN + "/mcp", "memoria", NOW + 200
+    )
 
 
 @pytest.mark.parametrize(
@@ -748,9 +771,10 @@ def test_refresh_concurrent_single_winner(env):
         t.join()
     assert results.count("ok") == 1
     # Os outros viram reuso: a família inteira cai (inclusive o par do vencedor).
-    assert env.conn.execute(
-        "SELECT count(*) FROM oauth_tokens WHERE revoked_at IS NULL"
-    ).fetchone()[0] == 0
+    assert (
+        env.conn.execute("SELECT count(*) FROM oauth_tokens WHERE revoked_at IS NULL").fetchone()[0]
+        == 0
+    )
 
 
 def test_refresh_expiry_and_ceiling(env):
@@ -866,7 +890,9 @@ def test_cleanup_expired(env):
     tokens = claude_tokens(env)
     second = refresh(env, tokens.refresh_token, NOW + 100)
     _, challenge = pkce()
-    req = oauth.validate_authorize(env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW)
+    req = oauth.validate_authorize(
+        env.conn, env.config, claude_params(challenge), FakeFetcher(), NOW
+    )
     oauth.create_transaction(env.conn, env.keyring, req, None, NOW, 20)
     counts = oauth.cleanup_expired(env.conn, NOW + 3601)
     assert counts["transacoes"] == 1 and counts["codigos"] == 1 and counts["access"] == 1

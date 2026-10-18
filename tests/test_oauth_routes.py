@@ -69,8 +69,9 @@ def stub_routes(deps):
 
 
 class Server:
-    def __init__(self, env, creation_rate=None):
-        self.env = env
+    def __init__(self, environment, creation_rate=None):
+        self.env = environment
+        env = environment  # noqa: F811
         self.clock = [NOW]
         self.events = []
         self.deps = OAuthDeps(
@@ -402,10 +403,10 @@ def test_authorize_redirect_error_keeps_state(server, changes, error):
 
 
 def test_state_exact_and_absent(server):
-    tokens, query = connect_claude(server, server.browser(), "conta-1", state="x y+z/%20=é")
+    _, query = connect_claude(server, server.browser(), "conta-1", state="x y+z/%20=é")
     assert query["state"] == ["x y+z/%20=é"]
     browser = server.browser()
-    verifier, challenge = pkce()
+    _, challenge = pkce()
     tx, csrf, _ = authorize(browser, claude_query(challenge, state=None))
     response = login(server, browser, tx, csrf)
     _, response = consent(browser, response.headers["location"], rotulo="conta-2")
@@ -799,7 +800,7 @@ def test_pages_have_no_script_or_inline(server):
 def test_no_secret_in_logs_or_events(server, caplog):
     caplog.set_level(logging.DEBUG)
     browser = server.browser()
-    tokens, query = connect_claude(server, browser, "conta-1", state="estado-secreto-9")
+    tokens, _ = connect_claude(server, browser, "conta-1", state="estado-secreto-9")
     refreshed = token(
         browser,
         {
@@ -815,7 +816,11 @@ def test_no_secret_in_logs_or_events(server, caplog):
         + [PASSWORD, "estado-secreto-9", tokens["access_token"], tokens["refresh_token"]]
         + [refreshed["access_token"], refreshed["refresh_token"]]
     )
-    text = caplog.text + repr(server.events)
+    # Os logs do httpx2 são do cliente de teste (o "navegador"), não do servidor.
+    server_logs = "\n".join(
+        r.getMessage() for r in caplog.records if not r.name.startswith("httpx")
+    )
+    text = server_logs + repr(server.events)
     for value in secrets_:
         assert value and value not in text
     for event, _ in server.events:

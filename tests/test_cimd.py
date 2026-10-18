@@ -33,7 +33,11 @@ def config():
 def test_resolve_claude_and_cache(conn, config):
     fetcher = FakeFetcher(headers={"cache-control": "public, max-age=600"})
     info = resolve_client(conn, config, CLAUDE_CIMD_CLIENT_ID, fetcher, NOW)
-    assert (info.kind, info.client_name, info.redirect_uri) == ("cimd", "Claude", CLAUDE_REDIRECT_URI)
+    assert (info.kind, info.client_name, info.redirect_uri) == (
+        "cimd",
+        "Claude",
+        CLAUDE_REDIRECT_URI,
+    )
     assert fetcher.calls == [(CLAUDE_CIMD_CLIENT_ID, 64 * 1024, 5.0)]
     stored = json.loads(conn.execute("SELECT metadata_json FROM oauth_clients").fetchone()[0])
     assert stored == {
@@ -117,9 +121,9 @@ def test_invalid_documents(conn, config, fetcher):
 
 
 def test_client_name_sanitized(conn, config):
-    fetcher = FakeFetcher(body=claude_document(client_name="Cla‮ude\x00" + "x" * 300))
+    fetcher = FakeFetcher(body=claude_document(client_name="Cla\u202eude\x00" + "x" * 300))
     info = resolve_client(conn, config, CLAUDE_CIMD_CLIENT_ID, fetcher, NOW)
-    assert "‮" not in info.client_name and "\x00" not in info.client_name
+    assert "\u202e" not in info.client_name and "\x00" not in info.client_name
     assert len(info.client_name) <= 100
 
 
